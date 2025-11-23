@@ -16,7 +16,6 @@ import numpy as np
 import tqdm
 import tskit
 import tszip
-import tsinfer
 import click
 import humanize
 import pandas as pd

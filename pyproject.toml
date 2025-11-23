@@ -59,6 +59,13 @@ docs = [
   "sphinx-argparse==0.5.2",
   "sphinx-issues==5.0.1",
   "IPython",
+  # docs requires running the CLI, which means we need to full inference 
+  # requirements also
+  "scipy",
+  "biotite",
+  "tsinfer>=0.5",
+  "pyfaidx",
+  "numba",
 ]
 
 [build-system]
