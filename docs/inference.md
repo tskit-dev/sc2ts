@@ -94,9 +94,17 @@ debugging metadata included (see the section on the Debug utilities below)
 Primary inference can be stopped and picked up again at any point using
 the ``--start`` option.
 
-:::{todo}
-Add documentation for the toml config file
-:::
+<!-- :::{todo} -->
+<!-- Add documentation for the toml config file -->
+<!-- ::: -->
+### Config file format
+
+All parameters for primary inference are specified using the [toml](https://toml.io/en/)
+config file. There are documented in the example config file used here:
+
+```{literalinclude} example_config.toml
+:language: toml
+```
 
 ## Postprocessing
 
