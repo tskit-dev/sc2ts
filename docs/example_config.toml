@@ -1,6 +1,13 @@
+
+# This is a path to the dataset, in VCZ format.
 dataset="viridian_mafft_2024-10-14_v1.vcz.zip"
+# The metadata field used for dates. For the Viridian dataset, this is 
+# "Date_tree" (which means, "date used to partition samples when building 
+# the Viridian tree")
 date_field="Date_tree"
 
+# The run_id is a prefix added to all output files. This is useful when 
+# running lots of different parameter combinations.
 run_id="ex1"
 # Configure where the result files are stored. For simplicity
 # we put them all in the "example_inference" directory.
@@ -13,8 +20,9 @@ matches_dir= "example_inference/"
 # This is full debug output, which is verbose (but useful!)
 log_level = 2
 
-# Dates to exclude from inference. This one is a large outlier in terms of the 
-# numbers of samples, and enriched for incorrectly assigned dates.
+# Dates to exclude from inference. This one is a large outlier in the 
+# Viridian data in terms of the numbers of samples, and enriched for 
+# incorrectly assigned dates.
 exclude_dates = ["2020-12-31"]
 
 # The set of site positions to mask during inference (list of integers).
@@ -23,24 +31,49 @@ exclude_dates = ["2020-12-31"]
 exclude_sites = []
 
 [extend_parameters]
+# The recombination penalty "k" parameter
 num_mismatches=4
+# Any samples with a HMM cost <= to this value are included in the ARG
 hmm_cost_threshold=7
+# The maximum number of missing sites for a sample to be considered
 max_missing_sites=500
+# Do we mask deletions as missing data?
 deletions_as_missing=true
+# The maximum number of samples to consider, per day
 # max_daily_samples=1000
 
-# Knobs for tuning retro group insertion
+## Various knobs for tuning retro group insertion:
+
+# The minimum number of samples in a retro group
 min_group_size=10
+# The minimum number of mutations shared by all samples
 min_root_mutations=2
+# The maxmimum number of recurrent mutations in the group tree
 max_recurrent_mutations=2
+# The maxmimum number of mutations per sample, overall
 max_mutations_per_sample=5
+# The size of the windown in which to consider samples for retrospective
+# inclusion, in days.
 retrospective_window=7
 
+## Performance parameters.
+
+# The number of matching threads to use. -1 means use all available cores.
+# Note that this will likely not make much difference until large numbers
+# of samples per days are involved.
 num_threads=-1
+# An approximate ceiling on the total amount of memory used (in GiB) by HMM
+# matching. Once the memory used goes above this value, new HMM match jobs are
+# held back until it goes under it again. If many memory intensive match jobs
+# are run at once however, this will not prevent them from exceeding this
+# limit.
 memory_limit=32
 
+# A list of sample IDs (strings) for unconditional inclusion (e.g., to 
+# help seed major saltation events).
 include_samples=[]
 
+# Override specific parameter values over a time period.
 [[override]]
 start = "2020-01-01"
 stop = "2020-03-01"

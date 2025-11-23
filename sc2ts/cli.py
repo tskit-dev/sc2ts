@@ -16,7 +16,6 @@ import numpy as np
 import tqdm
 import tskit
 import tszip
-import tsinfer
 import click
 import humanize
 import pandas as pd
@@ -130,7 +129,7 @@ def setup_logging(verbosity, log_file=None, date=None):
     is_flag=True,
     flag_value=True,
     help=(
-        "If true, initialise a new dataset. WARNING! This will erase and existing "
+        "If true, initialise a new dataset. WARNING! This will erase an existing "
         "store"
     ),
 )
