@@ -8,7 +8,7 @@ on a local machine using an example config file, using the Viridian data downloa
 from Zenodo.
 
 Inference is performed using the CLI, which is composed of number of subcommands.
-See {ref}`sc2ts_sec_cli` section for more information
+See the {ref}`sc2ts_sec_cli` section for more information
 
 ## Prerequisites
 

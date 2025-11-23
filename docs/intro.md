@@ -11,12 +11,20 @@ It consists of:
 3. A lightweight wrapper around [Zarr](https://zarr.dev) for convenient access to the
    Viridian dataset (alignments and metadata) in VCF Zarr format.
 
-The underlying methods are described in the sc2ts [preprint](
+The methods are described in the sc2ts [preprint](
 <https://www.biorxiv.org/content/10.1101/2023.06.08.544212v2>).
 
-Most users will use the {ref}`sec_python_api` to perform {ref}`sec_arg_analysis`
-on the sc2ts inferred ARG or {ref}`sec_alignments_analysis` on the
-Zarr-formatted Viridian dataset distributed on Zenodo.
 
-Uses who wish to perform {ref}`sec_inference` use the
-{ref}`sc2ts_sec_cli`.
+## Quickstart
+
+- See the {ref}`sec_inference` section for an example of running
+primary inference using the {ref}`sc2ts_sec_cli`.
+
+- See the {ref}`sec_arg_analysis` section for examples of using the
+{ref}`sec_python_api` to analyse the sc2ts Viridian ARG.
+
+- See the {ref}`sec_alignments_analysis` section for examples
+of using the {ref}`sec_python_api` to analyse the Viridian
+alignments and metadata in
+[VCF Zarr format](https://doi.org/10.1093/gigascience/giaf049).
+
