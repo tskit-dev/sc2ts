@@ -13,6 +13,6 @@ in a single file using the [VCF Zarr specification](https://doi.org/10.1093/giga
 
 Please see the online [documentation](https://tskit.dev/sc2ts/docs) for details
 on the software
-and the [preprint](https://www.biorxiv.org/content/10.1101/2023.06.08.544212v2)
+and the [preprint](https://www.biorxiv.org/content/10.1101/2023.06.08.544212v3)
 for information on the method and the inferred ARG.
 
