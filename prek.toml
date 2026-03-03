@@ -1,0 +1,30 @@
+[settings]
+exclude = []
+
+[[builtin]]
+id = "check-added-large-files"
+
+[[builtin]]
+id = "check-merge-conflict"
+
+[[builtin]]
+id = "mixed-line-ending"
+
+[[builtin]]
+id = "check-case-conflict"
+
+[[builtin]]
+id = "check-yaml"
+
+[[builtin]]
+id = "check-toml"
+
+[[local]]
+id = "ruff-check"
+entry = "ruff check --fix --force-exclude"
+types = ["python"]
+
+[[local]]
+id = "ruff-format"
+entry = "ruff format --force-exclude"
+types = ["python"]
