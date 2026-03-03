@@ -1,0 +1,12 @@
+name: Packaging
+
+on:
+  pull_request:
+  merge_group:
+
+jobs:
+  packaging:
+    uses: tskit-dev/.github/.github/workflows/python-packaging.yml@v13
+    with:
+      pyproject-directory: .
+      cli-test-cmd: sc2ts --help
