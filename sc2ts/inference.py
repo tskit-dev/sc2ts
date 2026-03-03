@@ -1,37 +1,31 @@
 from __future__ import annotations
-import bz2
-import logging
-import datetime
-import dataclasses
-import collections
-import concurrent.futures as cf
-import inspect
-import time
-import json
-import pickle
-import hashlib
-import sqlite3
-import pathlib
-import random
-import os
-import threading
 
+import bz2
+import collections
+import dataclasses
+import datetime
+import hashlib
+import inspect
+import json
+import logging
+import os
+import pathlib
+import pickle
+import random
+import sqlite3
+import threading
+import time
+
+import _tsinfer
+import humanize
+import numpy as np
+import pandas as pd
 import tqdm
+import tsinfer
 import tskit
 import tszip
-import _tsinfer
-import tsinfer
-import numpy as np
-import zarr
-import numba
-import humanize
-import pandas as pd
 
-from . import core
-from . import data_import
-from . import jit
-from . import stats
-from . import tree_ops
+from . import core, data_import, jit, stats, tree_ops
 from . import dataset as _dataset
 
 logger = logging.getLogger(__name__)
@@ -227,7 +221,7 @@ class MatchDb:
         with sqlite3.connect(db_path) as conn:
             conn.execute(sql)
             conn.execute(
-                "CREATE INDEX [ix_samples_match_date] on 'samples' " "([match_date]);"
+                "CREATE INDEX [ix_samples_match_date] on 'samples' ([match_date]);"
             )
         logger.info(f"Created new MatchDb at {db_path}")
         return MatchDb(db_path)
@@ -270,7 +264,9 @@ def mirror_ts_coordinates(ts):
     return tables.tree_sequence()
 
 
-def initial_ts(problematic_sites=list()):
+def initial_ts(problematic_sites=None):
+    if problematic_sites is None:
+        problematic_sites = []
     reference = data_import.get_reference_sequence()
     L = core.REFERENCE_SEQUENCE_LENGTH
     assert L == len(reference)
@@ -461,7 +457,7 @@ def match_samples(
         deletions_as_missing=deletions_as_missing,
         show_progress=show_progress,
         progress_title=date,
-        progress_phase=f"match(F)",
+        progress_phase="match(F)",
     )
 
 
@@ -497,9 +493,7 @@ def preprocess(
         # Do we need to do this here? Would be easier to do later, maybe
         sample.haplotype = _dataset.mask_ambiguous(a)
         counts = collections.Counter(a)
-        sample.alignment_composition = {
-            alleles[k]: count for k, count in counts.items()
-        }
+        sample.alignment_composition = {alleles[k]: count for k, count in counts.items()}
         samples.append(sample)
     return samples
 
@@ -706,7 +700,7 @@ def _extend(
 
         ts = add_exact_matches(ts=ts, match_db=match_db, date=date)
 
-        logger.info(f"Update ARG with low-cost samples")
+        logger.info("Update ARG with low-cost samples")
         ts, _ = add_matching_results(
             f"match_date=='{date}' and hmm_cost>0 and hmm_cost<={hmm_cost_threshold}",
             ts=ts,
@@ -735,8 +729,7 @@ def _extend(
     )
     for group in groups:
         logger.warning(
-            f"Add retro group {group.summary()}:"
-            f"{group.tree_quality_metrics.summary()}"
+            f"Add retro group {group.summary()}:{group.tree_quality_metrics.summary()}"
         )
 
     return update_top_level_metadata(ts, date, groups, samples)
@@ -746,7 +739,6 @@ def update_top_level_metadata(ts, date, retro_groups, samples):
     tables = ts.dump_tables()
     md = tables.metadata
     md["sc2ts"]["date"] = date
-    num_samples = len(samples)
     samples_strain = md["sc2ts"]["samples_strain"]
     new_samples = ts.samples()[len(samples_strain) :]
     inserted_samples = set()
@@ -823,7 +815,6 @@ def match_path_ts(group):
     tables.nodes.metadata_schema = tskit.MetadataSchema.permissive_json()
     tables.mutations.metadata_schema = tskit.MetadataSchema.permissive_json()
     site_id_map = {}
-    first_sample = len(tables.nodes)
     root = len(group)
     group_id = group.sample_hash
     for sample in group:
@@ -1064,7 +1055,8 @@ def add_matching_results(
                 continue
             if tqm.mean_mutations_per_sample > max_mutations_per_sample:
                 logger.debug(
-                    f"Skipping mean_mutations_per_sample={tqm.mean_mutations_per_sample} "
+                    "Skipping "
+                    f"mean_mutations_per_sample={tqm.mean_mutations_per_sample} "
                     f"exceeds threshold {group.summary()}"
                 )
                 continue
@@ -1544,9 +1536,6 @@ class HmmMatch:
             f"={self.mutation_summary()}"
         )
 
-    def compute_cost(self, num_mismatches):
-        self.cost = num_mismatches * (len(self.path) - 1) + len(self.mutations)
-
     @property
     def breakpoints(self):
         breakpoints = [seg.left for seg in self.path]
@@ -1654,9 +1643,7 @@ def characterise_match_mutations(ts, samples):
                     closest_mutation.inherited_state == mutation.derived_state
                 )
                 if mutation.is_reversion:
-                    mutation.is_immediate_reversion = (
-                        closest_mutation.node == seg.parent
-                    )
+                    mutation.is_immediate_reversion = closest_mutation.node == seg.parent
     logger.debug(f"Characterised {num_mutations} mutations")
 
 
@@ -1720,9 +1707,7 @@ def attach_tree(
     tree = child_ts.first()
     has_root_mutations = np.any(child_ts.mutations_node == tree.root)
     condition = (
-        has_root_mutations
-        or len(attach_path) > 1
-        or len(group.immediate_reversions) > 0
+        has_root_mutations or len(attach_path) > 1 or len(group.immediate_reversions) > 0
     )
     if condition:
         child_ts = add_root_edge(child_ts)
@@ -2225,8 +2210,7 @@ def rewire_long_branch_splits(ts, rematch_results):
         logger.info(f"Rewiring for {rematch.recombinant}")
         for seg in rematch.original_match.path:
             e = np.where(
-                (ts.edges_child == rematch.recombinant)
-                & (ts.edges_parent == seg.parent)
+                (ts.edges_child == rematch.recombinant) & (ts.edges_parent == seg.parent)
             )[0]
             assert ts.edges_left[e] == seg.left
             assert ts.edges_right[e] == seg.right
@@ -2304,8 +2288,7 @@ def rewire_long_branch_splits(ts, rematch_results):
         tables.nodes[rematch.recombinant] = row.replace(flags=0)
 
     logger.info(
-        f"Deleting {len(edges_to_delete)} edges and "
-        f"{len(mutations_to_delete)} mutations"
+        f"Deleting {len(edges_to_delete)} edges and {len(mutations_to_delete)} mutations"
     )
 
     return tree_ops.update_tables(tables, edges_to_delete, mutations_to_delete)
@@ -2442,7 +2425,7 @@ def map_parsimony(ts, ds, sites=None, *, show_progress=False):
 
     added_mutations = len(tables.mutations) - ts.num_mutations
     logger.info(
-        f"Added in {added_mutations} mutations at " f"{len(sites)} sites with parsimony"
+        f"Added in {added_mutations} mutations at {len(sites)} sites with parsimony"
     )
 
     keep_mutations = np.append(keep_mutations, np.ones(added_mutations, dtype=bool))

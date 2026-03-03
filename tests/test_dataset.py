@@ -1,14 +1,13 @@
 import itertools
 
 import numpy as np
-import pytest
 import numpy.testing as nt
-import xarray.testing as xt
+import pytest
 import sgkit
+import xarray.testing as xt
 
 import sc2ts
-from sc2ts import jit
-from sc2ts import data_import
+from sc2ts import data_import, jit
 
 
 def assert_datasets_equal(ds1, ds2):
@@ -36,7 +35,6 @@ def test_massaged_viridian_metadata(fx_raw_viridian_metadata_df):
 
 
 class TestCreateDataset:
-
     def test_new(self, tmp_path):
         path = tmp_path / "dataset.vcz"
         sc2ts.Dataset.new(path)
@@ -227,7 +225,6 @@ class TestCreateDataset:
 
 
 class TestDatasetFasta:
-
     def test_write_fasta_all(self, tmp_path, fx_dataset, fx_alignments_fasta):
         path = tmp_path / "export.fa"
         with open(path, "w") as f:
@@ -288,7 +285,6 @@ class TestDatasetFasta:
 
 
 class TestDatasetVariants:
-
     def test_all(self, fx_dataset):
         G = fx_dataset["call_genotype"][:].squeeze()
         pos = fx_dataset["variant_position"][:]
@@ -351,7 +347,6 @@ class TestDatasetVariants:
 
 
 class TestDatasetMethods:
-
     def test_zarr_mapping(self, fx_dataset):
         assert len(fx_dataset) == len(fx_dataset.root)
         assert list(fx_dataset) == list(fx_dataset.root)
@@ -382,7 +377,6 @@ class TestDatasetMethods:
 
 
 class TestMafftAlignments:
-
     def test_import(self, tmp_path, fx_encoded_alignments_mafft):
         path = tmp_path / "dataset.vcz"
         sc2ts.Dataset.new(path)
@@ -398,7 +392,6 @@ class TestMafftAlignments:
 
 
 class TestDatasetAlignments:
-
     def test_fetch_known(self, fx_dataset):
         a = fx_dataset.alignment["SRR11772659"]
         assert a.shape == (sc2ts.REFERENCE_SEQUENCE_LENGTH - 1,)
@@ -449,7 +442,6 @@ class TestDatasetAlignments:
 
 
 class TestDatasetMetadata:
-
     def test_len(self, fx_dataset):
         assert len(fx_dataset.metadata) == 55
 
@@ -602,7 +594,6 @@ class TestDecodeAlleles:
 
 
 class TestMaskFlankingDeletions:
-
     @pytest.mark.parametrize(
         ["nucs", "expected"],
         [

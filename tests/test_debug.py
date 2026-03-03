@@ -1,18 +1,13 @@
-import datetime
 import inspect
 
+import matplotlib
 import numpy as np
 import numpy.testing as nt
 import pandas as pd
-import matplotlib
 import pytest
-
-import msprime
-import tskit
 
 import sc2ts
 from sc2ts import debug
-from sc2ts import inference as si
 
 
 @pytest.fixture
@@ -161,12 +156,6 @@ class TestArgInfo:
         assert df.loc["sample_groups"].value == 27
         assert df.loc["retro_sample_groups"].value == 1
 
-    def test_summary(self, fx_ti_2020_02_15):
-        df = fx_ti_2020_02_15.summary()
-        assert df.loc["samples"].value == 43
-        assert df.loc["sample_groups"].value == 27
-        assert df.loc["retro_sample_groups"].value == 1
-
     def test_recombinants_summary_example_1(self, fx_ti_recombinant_example_1):
         df = fx_ti_recombinant_example_1.recombinants_summary()
         assert df.shape[0] == 1
@@ -263,7 +252,6 @@ class TestSampleGroupInfo:
 
 
 class TestDataFuncsEquivalant:
-
     def test_example_node(self, fx_ts_min_2020_02_15, fx_ti_2020_02_15):
         ts = fx_ts_min_2020_02_15
         ti = fx_ti_2020_02_15

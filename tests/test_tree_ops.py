@@ -1,13 +1,11 @@
+import biotite.sequence.phylo as bsp
+import msprime
 import numpy as np
+import numpy.testing as nt
 import pytest
 import tskit
-import msprime
-import biotite.sequence.phylo as bsp
-import numpy.testing as nt
 
-import sc2ts
-from sc2ts import tree_ops
-from sc2ts import inference
+from sc2ts import inference, tree_ops
 
 
 def all_trees_ts(n):
@@ -73,7 +71,6 @@ def prepare(tables):
 
 
 class TestSplitBranch:
-
     def test_root(self):
         # 2.00┊    6    ┊
         #     ┊  ┏━┻━┓  ┊
@@ -658,7 +655,6 @@ class TestTrimBranches:
 
 
 class TestFullSpanSibs:
-
     @pytest.mark.parametrize(
         ["nodes", "sibs"],
         [
@@ -707,7 +703,6 @@ class TestFullSpanSibs:
 
 
 class TestInferBinary:
-
     def check_properties(self, ts):
         assert ts.num_trees == 1
         tree = ts.first()
@@ -777,7 +772,6 @@ class TestInferBinary:
 
 
 class TestFromBiotite:
-
     def check_round_trip(self, tsk_tree):
         node_labels = {u: f"{u}" for u in tsk_tree.tree_sequence.samples()}
         nwk = tsk_tree.as_newick(node_labels=node_labels)
@@ -798,7 +792,6 @@ class TestFromBiotite:
 
 
 class TestRerooting:
-
     def check_properties(self, before, after, root):
         assert after.num_trees == 1
         assert before.sequence_length == after.sequence_length
@@ -924,7 +917,6 @@ class TestRerooting:
 
 
 class TestDropVestigialRootEdge:
-
     def test_example(self, fx_ts_map):
         ts = fx_ts_map["2020-02-13"]
         e = ts.edge(-1)

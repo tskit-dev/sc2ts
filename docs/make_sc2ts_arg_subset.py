@@ -1,5 +1,5 @@
-import tszip
 import numpy as np
+import tszip
 
 ts = tszip.load("sc2ts_viridian_v1.2.trees.tsz")
 

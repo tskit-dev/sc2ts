@@ -1,17 +1,15 @@
 import dataclasses
+import gzip
 import pathlib
 import shutil
-import gzip
-import tskit
 
 import numpy as np
 import pandas as pd
 import pytest
+import tskit
 
 import sc2ts
-from sc2ts import cli
-from sc2ts import data_import
-from sc2ts import jit
+from sc2ts import data_import, jit
 from sc2ts import inference as si
 
 
@@ -103,9 +101,7 @@ def fx_dataset(tmp_path, fx_data_cache, fx_alignments_fasta, fx_metadata_df):
         # Use an awkward chunk size here to make sure we're hitting across
         # chunk stuff by default
         sc2ts.Dataset.new(fs_path, samples_chunk_size=7)
-        sc2ts.Dataset.append_alignments(
-            fs_path, encoded_alignments(fx_alignments_fasta)
-        )
+        sc2ts.Dataset.append_alignments(fs_path, encoded_alignments(fx_alignments_fasta))
         sc2ts.Dataset.add_metadata(fs_path, fx_metadata_df)
         sc2ts.Dataset.create_zip(fs_path, cache_path)
     return sc2ts.Dataset(cache_path, date_field="date")

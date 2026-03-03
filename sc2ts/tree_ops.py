@@ -4,21 +4,18 @@ with well defined inputs and outputs in terms of tskit tree sequences, or relate
 objects.
 """
 
-import time
 import collections
-import logging
 import dataclasses
-from typing import List
+import logging
 
-import tskit
-import tqdm
-import numpy as np
-import scipy.spatial.distance
-import scipy.cluster.hierarchy
 import biotite.sequence.phylo as bsp
+import numpy as np
+import scipy.cluster.hierarchy
+import scipy.spatial.distance
+import tqdm
+import tskit
 
-from . import core
-from . import stats
+from . import core, stats
 
 logger = logging.getLogger(__name__)
 
@@ -645,8 +642,6 @@ def split_branch(ts, node, mutations):
     tables.sort()
     tables.build_index()
     return tables.tree_sequence()
-
-
 
 
 def drop_vestigial_root_edge(ts):

@@ -1,31 +1,22 @@
-import json
 import collections
 import concurrent.futures as cf
+import datetime
+import json
 import logging
-import itertools
 import pathlib
 import sys
-import contextlib
-import dataclasses
-import datetime
-import time
-from typing import List
 
-import tomli
-import numpy as np
-import tqdm
-import tskit
-import tszip
 import click
 import humanize
+import numpy as np
 import pandas as pd
+import tomli
+import tqdm
+import tszip
 
 import sc2ts
-from . import core
-from . import data_import
-from . import tree_ops
-from . import jit
-from . import validation
+
+from . import core, data_import, jit, tree_ops, validation
 from . import inference as si  # sc2ts inference
 
 logger = logging.getLogger(__name__)
@@ -86,7 +77,11 @@ def summarise_usage(ts):
     max_mem = d["max_memory"]
     if max_mem > 0:
         maxmem_str = "; max_memory=" + humanize.naturalsize(max_mem, binary=True)
-    return f"elapsed={wall_time:.2f}m; user={user_time:.2f}m; sys={sys_time:.2f}m{maxmem_str}"
+    return (
+        f"elapsed={wall_time:.2f}m; "
+        f"user={user_time:.2f}m; "
+        f"sys={sys_time:.2f}m{maxmem_str}"
+    )
 
 
 def setup_logging(verbosity, log_file=None, date=None):
@@ -129,8 +124,7 @@ def setup_logging(verbosity, log_file=None, date=None):
     is_flag=True,
     flag_value=True,
     help=(
-        "If true, initialise a new dataset. WARNING! This will erase an existing "
-        "store"
+        "If true, initialise a new dataset. WARNING! This will erase an existing store"
     ),
 )
 @progress
@@ -280,9 +274,7 @@ def _run_extend(out_path, verbose, log_file, **params):
 
 @click.command()
 @click.argument("config_file", type=click.File(mode="rb"))
-@click.option(
-    "--start", default=None, help="Start inference at this date (inclusive). "
-)
+@click.option("--start", default=None, help="Start inference at this date (inclusive). ")
 @click.option(
     "--stop",
     default="3000",
@@ -373,9 +365,7 @@ def infer(config_file, start, stop, force):
 
         base_ts = ts_file_pattern.format(date=date)
         with cf.ProcessPoolExecutor(1) as executor:
-            future = executor.submit(
-                _run_extend, base_ts, log_level, log_file, **params
-            )
+            future = executor.submit(_run_extend, base_ts, log_level, log_file, **params)
             # Block and wait, raising exception if it occured
             future.result()
 
@@ -428,9 +418,7 @@ def validate(
     setup_logging(verbose)
 
     ts = tszip.load(ts_file)
-    ds = sc2ts.Dataset(
-        dataset, date_field=date_field, chunk_cache_size=chunk_cache_size
-    )
+    ds = sc2ts.Dataset(dataset, date_field=date_field, chunk_cache_size=chunk_cache_size)
     if genotypes:
         validation.validate_genotypes(ts, ds, deletions_as_missing, show_progress=True)
     if metadata:
@@ -749,9 +737,7 @@ def find_previous_date_path(date, path_pattern):
         if path.exists():
             break
     else:
-        raise ValueError(
-            f"No path exists for pattern {path_pattern} starting at {date}"
-        )
+        raise ValueError(f"No path exists for pattern {path_pattern} starting at {date}")
     return path
 
 

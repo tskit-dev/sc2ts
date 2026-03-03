@@ -15,7 +15,6 @@ def fx_ds_v1():
 
 
 class TestStatFuncs:
-
     def test_top_level_md(self, fx_ts_v1):
         ts = fx_ts_v1
         assert ts.metadata == {"time_zero_date": "2020-02-15"}
@@ -32,7 +31,6 @@ class TestStatFuncs:
 
 
 class TestDataset:
-
     def test_basics(self, fx_ds_v1):
         ds = fx_ds_v1
         G = ds["call_genotype"][:].squeeze()

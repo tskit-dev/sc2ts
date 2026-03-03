@@ -1,23 +1,20 @@
 import io
 import json
-import collections
 
+import click.testing as ct
 import numpy as np
 import numpy.testing as nt
-import click.testing as ct
-import pytest
-import tskit
-import tomli_w
 import pandas as pd
+import pytest
+import tomli_w
+import tskit
 
 import sc2ts
-from sc2ts import __main__ as main
 from sc2ts import cli
 from sc2ts import inference as si
 
 
 class TestImportAlignments:
-
     def test_init(self, tmp_path, fx_alignments_fasta):
         ds_path = tmp_path / "ds.zarr"
         runner = ct.CliRunner()
@@ -61,7 +58,10 @@ class TestImportMetadata:
 
         result = runner.invoke(
             cli.cli,
-            f"import-metadata {ds_path} {fx_metadata_tsv} --field-descriptions={fields_path}",
+            (
+                f"import-metadata {ds_path} {fx_metadata_tsv} "
+                f"--field-descriptions={fields_path}"
+            ),
             catch_exceptions=False,
         )
         ds = sc2ts.Dataset(ds_path)
@@ -87,7 +87,6 @@ class TestImportMetadata:
 
 
 class TestRunHmm:
-
     def test_single_defaults(self, tmp_path, fx_ts_map, fx_dataset):
         strain = "ERR4206593"
         ts = fx_ts_map["2020-02-04"]
@@ -159,7 +158,6 @@ class TestRunHmm:
 
 
 class TestInfer:
-
     def make_config(
         self,
         tmp_path,
@@ -379,7 +377,6 @@ class TestInfer:
 
 
 class TestPostprocess:
-
     def test_example(self, tmp_path, fx_ts_map, fx_match_db):
         ts = fx_ts_map["2020-02-13"]
         out_ts_path = tmp_path / "ts.ts"
@@ -399,7 +396,6 @@ class TestPostprocess:
 
 
 class TestMinimiseMetadata:
-
     def test_example(self, tmp_path, fx_ts_map):
         ts = fx_ts_map["2020-02-13"]
         out_ts_path = tmp_path / "ts.ts"
@@ -411,9 +407,7 @@ class TestMinimiseMetadata:
         )
         assert result.exit_code == 0
         out = tskit.load(out_ts_path)
-        ts.tables.assert_equals(
-            out.tables, ignore_metadata=True, ignore_provenance=True
-        )
+        ts.tables.assert_equals(out.tables, ignore_metadata=True, ignore_provenance=True)
         dfn = sc2ts.node_data(out, inheritance_stats=False)
         assert "sample_id" in dfn
         # Check we've kept the vestigial root edge
@@ -447,16 +441,13 @@ class TestMinimiseMetadata:
         )
         assert result.exit_code == 0
         out = tskit.load(out_ts_path)
-        ts.tables.assert_equals(
-            out.tables, ignore_metadata=True, ignore_provenance=True
-        )
+        ts.tables.assert_equals(out.tables, ignore_metadata=True, ignore_provenance=True)
         dfn = sc2ts.node_data(out, inheritance_stats=False)
         assert "sample_id" in dfn
         assert "pango" in dfn
 
 
 class TestMapParsimony:
-
     def test_example(self, tmp_path, fx_ts_map, fx_dataset):
         ts = fx_ts_map["2020-02-13"]
         out_ts_path = tmp_path / "ts.ts"
@@ -494,9 +485,7 @@ class TestMapParsimony:
         )
         assert result.exit_code == 0
         out = tskit.load(out_ts_path)
-        ts.tables.assert_equals(
-            out.tables, ignore_metadata=True, ignore_provenance=True
-        )
+        ts.tables.assert_equals(out.tables, ignore_metadata=True, ignore_provenance=True)
 
     def test_example_no_sites(self, tmp_path, fx_ts_map, fx_dataset):
         ts = fx_ts_map["2020-02-13"]
@@ -516,7 +505,6 @@ class TestMapParsimony:
 
 
 class TestApplyParsimonyHeuristics:
-
     def test_example(self, tmp_path, fx_ts_map):
         ts = fx_ts_map["2020-02-13"]
         out_ts_path = tmp_path / "out.ts"
@@ -537,7 +525,6 @@ class TestApplyParsimonyHeuristics:
 
 
 class TestRematchRecombinant:
-
     def test_recombinant_example_1(self, fx_recombinant_example_1_info):
         info = fx_recombinant_example_1_info
 
@@ -555,7 +542,6 @@ class TestRematchRecombinant:
 
 
 class TestRematchRecombinantLbs:
-
     def test_recombinant_example_1(self, fx_recombinant_example_1_info):
         info = fx_recombinant_example_1_info
 
@@ -595,7 +581,6 @@ class TestRewireLbs:
 
 
 class TestValidate:
-
     @pytest.mark.parametrize("date", ["2020-01-01", "2020-02-11"])
     def test_date(self, tmp_path, fx_ts_map, fx_dataset, date):
         ts = fx_ts_map[date]

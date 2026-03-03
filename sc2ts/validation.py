@@ -1,13 +1,13 @@
 import logging
 import unittest
 
-import numpy as np
 import numpy.testing as nt
 import tqdm
 
+import sc2ts
+
 logger = logging.getLogger(__name__)
 
-import sc2ts
 
 MISSING = -1
 DELETION = sc2ts.IUPAC_ALLELES.index("-")
