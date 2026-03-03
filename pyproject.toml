@@ -27,18 +27,10 @@ Documentation = "https://tskit.dev/sc2ts/docs/"
 "Bug Tracker" = "https://github.com/tskit-dev/sc2ts/issues"
 GitHub = "https://github.com/tskit-dev/sc2ts/"
 
-
 [project.scripts]
 sc2ts = "sc2ts.cli:cli"
 
 [project.optional-dependencies]
-dev = [
-  "msprime",
-  "sgkit",
-  "pytest",
-  "pytest-coverage",
-  "tomli-w",
-]
 inference = [
   "scipy",
   "biotite",
@@ -50,22 +42,53 @@ debug = [
   "matplotlib",
   "IPython",
 ]
-docs = [
-  "jupyter-book==1.0.4.post1",
-  "sphinx-book-theme",
-  "sphinx-copybutton",
-  "sphinx-click",
-  "setuptools_scm",
-  "sphinx-argparse==0.5.2",
-  "sphinx-issues==5.0.1",
-  "IPython",
-  # docs requires running the CLI, which means we need to full inference 
-  # requirements also
+
+[dependency-groups]
+test = [
+  "msprime",
+  "pytest",
+  "pytest-cov",
+  "pytest-xdist",
+  "sgkit",
+  "tomli-w",
+  # inference and debug deps needed by the test suite
   "scipy",
   "biotite",
   "tsinfer>=0.5",
   "pyfaidx",
   "numba",
+  "matplotlib",
+  "IPython",
+]
+docs = [
+  "jupyter-book",
+  "sphinx-book-theme",
+  "sphinx-copybutton",
+  "sphinx-click",
+  "setuptools_scm",
+  "sphinx-argparse",
+  "sphinx-issues",
+  "IPython",
+  # docs require running the CLI, which means the full inference deps are needed
+  "scipy",
+  "biotite",
+  "tsinfer>=0.5",
+  "pyfaidx",
+  "numba",
+]
+lint = [
+  "ruff==0.15.1",
+  "prek==0.3.3",
+]
+packaging = [
+  "twine",
+  "validate-pyproject[all]",
+]
+dev = [
+  {include-group = "docs"},
+  {include-group = "lint"},
+  {include-group = "test"},
+  {include-group = "packaging"},
 ]
 
 [build-system]
@@ -84,4 +107,11 @@ write_to = "sc2ts/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = "tests"
-addopts = "--cov=sc2ts --cov-report term-missing"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 89
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "W", "I", "N", "UP", "A", "PT"]
+fixable = ["ALL"]
