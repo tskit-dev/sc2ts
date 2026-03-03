@@ -1,30 +1,40 @@
-[settings]
-exclude = []
+# The prek configuration defining linting requirements. This
+# setup is optimised for long-term stability and determinism,
+# and therefore only uses either "builtin" rules or "local"
+# rules implementing lint workflows.  We do not use any remote
+# workflow repos.
 
-[[builtin]]
-id = "check-added-large-files"
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "check-added-large-files" },
+    { id = "check-merge-conflict" },
+    { id = "mixed-line-ending" },
+    { id = "check-case-conflict" },
+    { id = "check-yaml" },
+    { id = "check-toml" },
+]
 
-[[builtin]]
-id = "check-merge-conflict"
+[[repos]]
+repo = "local"
+hooks = [
+  {
+    id = "ruff-check",
+    name = "ruff check",
+    language = "system",
+    entry = "ruff check --fix --force-exclude",
+    types = ["python"],
+  },
+]
 
-[[builtin]]
-id = "mixed-line-ending"
-
-[[builtin]]
-id = "check-case-conflict"
-
-[[builtin]]
-id = "check-yaml"
-
-[[builtin]]
-id = "check-toml"
-
-[[local]]
-id = "ruff-check"
-entry = "ruff check --fix --force-exclude"
-types = ["python"]
-
-[[local]]
-id = "ruff-format"
-entry = "ruff format --force-exclude"
-types = ["python"]
+[[repos]]
+repo = "local"
+hooks = [
+  {
+    id = "ruff-format",
+    name = "ruff format",
+    language = "system",
+    entry = "ruff format --force-exclude",
+    types = ["python"],
+  },
+]
