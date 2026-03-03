@@ -1,0 +1,61 @@
+name: Integration tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, test]
+  merge_group:
+
+jobs:
+  end-to-end:
+    name: End to end tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          version: "0.8.15"
+      - name: Install dependencies
+        run: uv sync --locked --group test
+
+      - name: Create basedir
+        run: |
+          mkdir -p testrun
+          gunzip -k tests/data/alignments.fasta.gz
+
+      - name: Import alignments
+        run: uv run sc2ts import-alignments -i testrun/dataset.zarr tests/data/alignments.fasta
+
+      - name: Import metadata
+        run: uv run sc2ts import-metadata testrun/dataset.zarr tests/data/metadata.tsv
+
+      - name: Info dataset
+        run: uv run sc2ts info-dataset testrun/dataset.zarr
+
+      - name: Run inference
+        run: |
+          # doing ~10 days here as this is taking a while
+          uv run sc2ts infer tests/data/testrun-conf.toml --stop 2020-02-03
+
+      - name: Validate
+        run: uv run sc2ts validate -v --date-field=date testrun/dataset.zarr testrun/results/test/test_2020-02-02.ts
+
+      - name: MatchDB
+        run: uv run sc2ts info-matches testrun/test.matches.db
+
+  bare-api:
+    name: Bare API tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          version: "0.8.15"
+      - name: Install package only
+        run: uv pip install -e .
+      - name: Run tests
+        run: |
+          # Minimal deps only; avoid picking up conftest and fixtures
+          uv run pytest -v -c /dev/null -p no:sc2ts_fixtures tests/test_api.py
