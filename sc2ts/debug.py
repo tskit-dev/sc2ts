@@ -1623,7 +1623,10 @@ class ArgInfo:
         appropriate set of samples. See that function for more details.
         """
         return self.draw_subtree(
-            tracked_pango=[pango_lineage], position=position, *args, **kwargs # noqa B026
+            tracked_pango=[pango_lineage],
+            position=position,
+            *args,  # noqa B026
+            **kwargs,
         )
 
     def draw_subtree(
