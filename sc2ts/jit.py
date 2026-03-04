@@ -1,10 +1,10 @@
 import dataclasses
 import logging
 
-import numpy as np
 import numba
-import tskit.jit.numba as tskit_numba
+import numpy as np
 import tskit
+import tskit.jit.numba as tskit_numba
 
 NODE_IS_SAMPLE = tskit.NODE_IS_SAMPLE
 

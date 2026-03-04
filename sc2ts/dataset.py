@@ -2,20 +2,19 @@
 Methods for managing a sc2ts Zarr based dataset.
 """
 
-import dataclasses
-import os.path
-import zipfile
 import collections
-import logging
-import pathlib
 import concurrent.futures as cf
+import dataclasses
+import logging
+import os.path
+import pathlib
+import zipfile
 
-import tskit
-import tqdm
-import pandas as pd
-import zarr
 import numcodecs
 import numpy as np
+import pandas as pd
+import tqdm
+import zarr
 
 from sc2ts import core
 
@@ -236,6 +235,7 @@ class Variant:
     Represents a single variant, including the genomic position and the integer encoded
     genotypes.
     """
+
     position: int
     genotypes: np.ndarray
     alleles: list
@@ -252,6 +252,7 @@ class Dataset(collections.abc.Mapping):
     :param int chunk_cache_size: Maximum number of chunks to cache for
         alignments and metadata. Defaults to 1.
     """
+
     def __init__(self, path, chunk_cache_size=1, date_field=None):
         logger.info(f"Loading dataset @{path} using {date_field} as date field")
         self.date_field = date_field

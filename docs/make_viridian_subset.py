@@ -9,4 +9,3 @@ samples = samples[:k]
 path = f"viridian_mafft_subset_{k}_v1.vcz"
 ds.copy(path, sample_id=samples)
 sc2ts.Dataset.create_zip(path, path + ".zip")
-

@@ -4,28 +4,24 @@ of sc2ts inference. These are developer tools and are only
 included if the "debug"] option is included with the sc2ts
 install.
 """
+
 import collections
-import logging
-import json
-import warnings
 import dataclasses
 import datetime
+import json
+import logging
 import re
-from typing import List
+import warnings
 
-import tskit
-import numpy as np
-from tqdm.auto import tqdm
-import pandas as pd
 import humanize
 import matplotlib.pyplot as plt
-from matplotlib import colors
-from IPython.display import Markdown, HTML
+import numpy as np
+import pandas as pd
+import tskit
+from IPython.display import HTML, Markdown
+from tqdm.auto import tqdm
 
-from . import jit
-from . import core
-from . import inference
-from . import data_import
+from . import core, data_import, inference, jit
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +85,6 @@ def max_descendant_samples(ts, show_progress=True):
 
 
 class CopyingTable:
-
     default_colours = (  # Chosen to be light enough that black text on top is readable
         "#FC0",  # Gold for de-novo mutations
         "#8D8",  # Copy from first parent: light green
@@ -117,7 +112,7 @@ class CopyingTable:
             dist_to_left = 0
         if dist_to_right > 2:
             dist_to_right = 0
-        return f'<td title="{pos}" class="run-{int(dist_to_left)}-{int(dist_to_right)}"></td>'
+        return f'<td title="{pos}" "class="run-{int(dist_to_left)}-{int(dist_to_right)}"></td>'  # noqa E501
 
     def node_mutations(self):
         muts = {}
@@ -206,10 +201,11 @@ class CopyingTable:
             matches the first parent, ``colours[2]`` for the second parent, etc.
             Default: None, treated as ``["#FC0", "#8D8", "#6AD", "#B9D", "#A88"]``.
         :param exclude_stylesheet bool:
-            If True, exclude the default stylesheet from the HTML output. This is useful
-            simply to save space if you want to include the copying table in a larger HTML
-            document (e.g. a Jupyter notebook) that already has one copying table shown with
-            the standard stylesheet. If False or None (default), include the default stylesheet.
+            If True, exclude the default stylesheet from the HTML output. This
+            is useful simply to save space if you want to include the copying
+            table in a larger HTML document (e.g. a Jupyter notebook) that
+            already has one copying table shown with the standard stylesheet.
+            If False or None (default), include the default stylesheet.
         :param font_family str:
             The font family to use for the table. Default: None.
         :param css_class str:
@@ -284,7 +280,7 @@ class CopyingTable:
                         except IndexError as e:
                             raise ValueError(
                                 "Displaying the copying path only deals with a max of "
-                                f"{len(parent_colours)-1} parents"
+                                f"{len(parent_colours) - 1} parents"
                             ) from e
                     elif parent_allele == var.site.ancestral_state:
                         col = "#DDD"
@@ -310,19 +306,20 @@ class CopyingTable:
             runlength_cols = ("white", "red", "orange")
             bg_im_src = (
                 "background-image:linear-gradient(to right, {0} 50%, {1} 50%);"
-                "background-image:-webkit-linear-gradient(left, {0} 50%, {1} 50%);"  # for imgkit/wkhtmltopdf
+                # for imgkit/wkhtmltopdf
+                "background-image:-webkit-linear-gradient(left, {0} 50%, {1} 50%);"
             )
             html += "<style>"
             if font_family is not None:
                 html += f".copying-table {{font-family: '{font_family}'}}"
             html += ".copying-table .position {text-align: center; font-size: 7px}"
-            html += ".copying-table .pattern td {border:0px solid black; text-align: center; width:1em}"
+            html += ".copying-table .pattern td {border:0px solid black; text-align: center; width:1em}"  # noqa: E501
             html += ".copying-table .mut {text-align: center; font-size: 7px}"
             html += ".copying-table .ref {text-align: center; font-size: 9px}"
             html += ".copying-table {border-spacing: 0px; border-collapse: collapse}"
             html += ".copying-table .runlengths {font-size:3px; height:3px;}"
             html += ".copying-table .child-rgt {text-align: left;}"
-            html += ".copying-table .runlengths td {border-style: solid; background: white; border-width:0px 1px; border-color: black}"
+            html += ".copying-table .runlengths td {border-style: solid; background: white; border-width:0px 1px; border-color: black}"  # noqa: E501
             for left in range(len(runlength_cols)):
                 for right in range(len(runlength_cols)):
                     html += (
@@ -350,7 +347,8 @@ class CopyingTable:
         html += row_template.format(label=row_lab(child_label), data="".join(child))
         for i, parent in enumerate(parents):
             html += row_template.format(
-                label=row_lab(parent_labels.get(i + 1, f"P{i+1}")), data="".join(parent)
+                label=row_lab(parent_labels.get(i + 1, f"P{i + 1}")),
+                data="".join(parent),
             )
         if not hide_runlengths:
             p = np.concatenate(([-np.inf], positions, [np.inf]))
@@ -391,12 +389,8 @@ class ArgInfo:
         samples = ts.samples()
         self.strain_map = dict(zip(top_level_md["samples_strain"], ts.samples()))
 
-        self.sites_num_mutations = np.bincount(
-            ts.mutations_site, minlength=ts.num_sites
-        )
-        self.nodes_num_mutations = np.bincount(
-            ts.mutations_node, minlength=ts.num_nodes
-        )
+        self.sites_num_mutations = np.bincount(ts.mutations_site, minlength=ts.num_sites)
+        self.nodes_num_mutations = np.bincount(ts.mutations_node, minlength=ts.num_nodes)
         self.nodes_num_parents = np.bincount(ts.edges_child, minlength=ts.num_edges)
 
         # The number of samples per day in time-ago (i.e., the nodes_time units).
@@ -456,9 +450,7 @@ class ArgInfo:
         self.first_scorpio_sample = {}
 
         # NOTE: keyed by *string* because of JSON
-        exact_matches = ts.metadata["sc2ts"]["cumulative_stats"]["exact_matches"][
-            "node"
-        ]
+        exact_matches = ts.metadata["sc2ts"]["cumulative_stats"]["exact_matches"]["node"]
 
         iterator = tqdm(
             ts.nodes(),
@@ -567,7 +559,10 @@ class ArgInfo:
             parent = ts.mutations_parent[mut_id]
             if parent != -1:
                 mutations_num_inheritors[parent] -= descendants
-                is_reversion[mut_id] = self.mutations_inherited_state[parent] == self.mutations_derived_state[mut_id]
+                is_reversion[mut_id] = (
+                    self.mutations_inherited_state[parent]
+                    == self.mutations_derived_state[mut_id]
+                )
                 if is_reversion[mut_id] and ts.mutations_node[parent] == tree.parent(
                     mutation_node
                 ):
@@ -579,7 +574,10 @@ class ArgInfo:
                 parent = ts.mutations_parent[parent]
             mutations_num_parents[mut_id] = num_parents
             # Ts/Tvs
-            key = (self.mutations_inherited_state[mut_id], self.mutations_derived_state[mut_id])
+            key = (
+                self.mutations_inherited_state[mut_id],
+                self.mutations_derived_state[mut_id],
+            )
             mutations_is_transition[mut_id] = key in transitions
             mutations_is_transversion[mut_id] = key in transversions
             site = ts.mutations_site[mut_id]
@@ -612,7 +610,7 @@ class ArgInfo:
         re_nodes = np.sum(self.ts.nodes_flags == core.NODE_IS_RECOMBINANT)
         exact_matches = np.sum((self.ts.nodes_flags & core.NODE_IS_EXACT_MATCH) > 0)
         imr_nodes = np.sum(
-            (self.ts.nodes_flags == core.NODE_IS_IMMEDIATE_REVERSION_MARKER)
+            self.ts.nodes_flags == core.NODE_IS_IMMEDIATE_REVERSION_MARKER
         )
 
         samples = self.ts.samples()[1:]  # skip reference
@@ -707,10 +705,7 @@ class ArgInfo:
             strain = md["strain"]
         else:
             md = md.get("sc2ts", {})
-            if (
-                flags & (core.NODE_IS_MUTATION_OVERLAP | core.NODE_IS_REVERSION_PUSH)
-                > 0
-            ):
+            if flags & (core.NODE_IS_MUTATION_OVERLAP | core.NODE_IS_REVERSION_PUSH) > 0:
                 try:
                     strain = f"{md['date_added']}:{', '.join(md['mutations'])}"
                 except KeyError:
@@ -941,7 +936,8 @@ class ArgInfo:
             interval_left = interval[0][0]
             if interval_left >= interval_right:
                 logger.warning(
-                    f"RE: {u} interval_right >= interval_left; moving from {interval_left}"
+                    f"RE: {u} interval_right >= interval_left; "
+                    f"moving from {interval_left}"
                     f"to {interval_right - 1}"
                 )
                 interval_left = interval_right - 1
@@ -1510,7 +1506,7 @@ class ArgInfo:
                     first_date = self.nodes_date[self.first_scorpio_sample[col]]
                     first_scorpio_date.append((first_date, col))
                 except KeyError:
-                    warnings.warn(f"No samples for Scorpio {col} present")
+                    warnings.warn(f"No samples for Scorpio {col} present", stacklevel=2)
 
         df_scorpio = df_scorpio[keep_cols]
         ax4.set_title("Scorpio composition of processed samples")
@@ -1629,7 +1625,10 @@ class ArgInfo:
         appropriate set of samples. See that function for more details.
         """
         return self.draw_subtree(
-            tracked_pango=[pango_lineage], position=position, *args, **kwargs
+            tracked_pango=[pango_lineage],
+            position=position,
+            *args,  # noqa B026
+            **kwargs,
         )
 
     def draw_subtree(
@@ -1764,9 +1763,7 @@ class ArgInfo:
 
         if extra_tracked_samples is not None:
             tn_set = set(tracked_nodes)
-            extra_tracked_samples = [
-                e for e in extra_tracked_samples if e not in tn_set
-            ]
+            extra_tracked_samples = [e for e in extra_tracked_samples if e not in tn_set]
             tracked_nodes = np.concatenate((tracked_nodes, extra_tracked_samples))
         tree = ts.at(position, tracked_samples=tracked_nodes)
         order = np.array(
@@ -1868,7 +1865,7 @@ class ArgInfo:
         re_nodes = np.where(ts.nodes_flags & core.NODE_IS_RECOMBINANT)[0]
         styles.append(
             ",".join([f".node.n{u} > .sym" for u in re_nodes])
-            + f"{{r:{symbol_size/2*1.5:.2f}px; stroke:black; fill:white}}"
+            + f"{{r:{symbol_size / 2 * 1.5:.2f}px; stroke:black; fill:white}}"
         )
         if date_format == "cal":
             if y_ticks is not None:
@@ -1950,7 +1947,7 @@ class DeletionEvent:
     start: int
     node: int
     length: int
-    mutations: List
+    mutations: list
 
 
 def country_abbr(country):
@@ -1971,7 +1968,7 @@ def country_abbr(country):
 @dataclasses.dataclass
 class SampleGroupInfo:
     group_id: str
-    nodes: List[int]
+    nodes: list[int]
     ts: tskit.TreeSequence
     attach_date: None
 
@@ -1989,22 +1986,26 @@ class SampleGroupInfo:
         **kwargs,
     ):
         """
-        Draw an SVG representation of the tree of samples that trace to a single origin.
+        Draw an SVG representation of the tree of samples that trace to a
+        single origin.
 
         The default style is to colour mutations such that sites with a single
-        mutation in the tree are dark red, whereas sites with multiple mutations
-        show those mutations in red or magenta (magenta when a mutation immediately
-        reverts its parent mutation). Any identical mutations (from the same inherited
-        to derived state at the same site, i.e. recurrent mutations) have the count of
-        recurrent mutations appended to the label, e.g. "C842T (1/2)".
+        mutation in the tree are dark red, whereas sites with multiple
+        mutations show those mutations in red or magenta (magenta when a
+        mutation immediately reverts its parent mutation). Any identical
+        mutations (from the same inherited to derived state at the same site,
+        i.e. recurrent mutations) have the count of recurrent mutations
+        appended to the label, e.g. "C842T (1/2)".
 
-        If highlight_universal_mutations is set, then mutations in the ancestry of all
-        the samples (i.e. between the root and the MRCA of all the samples) are highlighted
+        If highlight_universal_mutations is set, then mutations in the ancestry
+        of all the samples (i.e. between the root and the MRCA of all the
+        samples) are highlighted
         in bold and with thicker symbol lines
 
-        If genetic_regions is set, it should be a dictionary mapping (start, end) tuples
-        to region names. These will be drawn as coloured rectangles on the x-axis. If None,
-        a default selection of SARS-CoV-2 genes will be used.
+        If genetic_regions is set, it should be a dictionary mapping (start,
+        end) tuples to region names. These will be drawn as coloured rectangles
+        on the x-axis. If None, a default selection of SARS-CoV-2 genes will be
+        used.
         """
         if x_regions is None:
             x_regions = {
@@ -2039,7 +2040,7 @@ class SampleGroupInfo:
             }
         elif node_labels == "pango+country":
             node_labels = {
-                n.id: f"{n.metadata.get(pango_md, '')}:{country_abbr(n.metadata.get('Country', ''))}"
+                n.id: f"{n.metadata.get(pango_md, '')}:{country_abbr(n.metadata.get('Country', ''))}"  # noqa E501
                 for n in ts.nodes()
                 if pango_md in n.metadata or "Country" in n.metadata
             }
@@ -2081,13 +2082,16 @@ class SampleGroupInfo:
                     mutation_labels[label].append(mut.id)
             # If more than one mutation has the same label, add a prefix with the counts
             mutation_labels = {
-                m_id: label + (f" ({i+1}/{len(ids)})" if len(ids) > 1 else "")
+                m_id: label + (f" ({i + 1}/{len(ids)})" if len(ids) > 1 else "")
                 for label, ids in mutation_labels.items()
                 for i, m_id in enumerate(ids)
             }
         # some default styles
         styles = [
-            ".mut .lab {fill: darkred} .mut .sym {stroke: darkred} .background path {fill: white}"
+            (
+                ".mut .lab {fill: darkred} .mut .sym {stroke: darkred} "
+                ".background path {fill: white}"
+            )
         ]
         if len(multiple_mutations) > 0:
             lab_css = ", ".join(f".mut.m{m} .lab" for m in multiple_mutations)
@@ -2112,7 +2116,7 @@ class SampleGroupInfo:
         re_nodes = np.where(ts.nodes_flags & core.NODE_IS_RECOMBINANT)[0]
         styles.append(
             ",".join([f".node.n{u} > .sym" for u in re_nodes])
-            + f"{{r: {symbol_size/2*1.5:.2f}px; stroke: black; fill: white}}"
+            + f"{{r: {symbol_size / 2 * 1.5:.2f}px; stroke: black; fill: white}}"
         )
         svg = self.ts.draw_svg(
             size=size,
@@ -2135,14 +2139,20 @@ class SampleGroupInfo:
 
             # Find SVG positions of the X axis
             m = re.search(
-                r'class="x-axis".*?class="ax-line" x1="([\d\.]+)" x2="([\d\.]+)" y1="([\d\.]+)"',
+                r'class="x-axis".*?class="ax-line" x1="([\d\.]+)" x2="([\d\.]+)" y1="([\d\.]+)"',  # noqa E501
                 svg,
             )
             assert m is not None
             x1, x2, y1 = float(m.group(1)), float(m.group(2)), float(m.group(3))
             xdiff = x2 - x1
-            x_box_svg = '<rect fill="yellow" stroke="black" x="{x}" width="{w}" y="{y}" height="{h}" />'
-            x_name_svg = '<text text-anchor="middle" alignment-baseline="hanging" x="{x}" y="{y}">{name}</text>'
+            x_box_svg = (
+                '<rect fill="yellow" stroke="black" x="{x}" '
+                'width="{w}" y="{y}" height="{h}" />'
+            )
+            x_name_svg = (
+                '<text text-anchor="middle" alignment-baseline="hanging" '
+                'x="{x}" y="{y}">{name}</text>'
+            )
             x_scale = xdiff / ts.sequence_length
             x_boxes = [
                 x_box_svg.format(

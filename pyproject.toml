@@ -12,7 +12,6 @@ dependencies = [
   "tszip",
   "pandas",
   "tqdm",
-  "zarr<3",
   "click>=8.2",
   # Not strictly needed for base functionality, but easier to include
   # as imported by the CLI
@@ -27,45 +26,70 @@ Documentation = "https://tskit.dev/sc2ts/docs/"
 "Bug Tracker" = "https://github.com/tskit-dev/sc2ts/issues"
 GitHub = "https://github.com/tskit-dev/sc2ts/"
 
-
 [project.scripts]
 sc2ts = "sc2ts.cli:cli"
 
+# NOTE: project.optional-dependencies and the dependency-groups below
+# cannot be deduplicated as they serve different purposes.
 [project.optional-dependencies]
-dev = [
-  "msprime",
-  "sgkit",
-  "pytest",
-  "pytest-coverage",
-  "tomli-w",
-]
 inference = [
   "scipy",
   "biotite",
-  "tsinfer>=0.5",
+  "tsinfer>=0.5,<1",
   "pyfaidx",
   "numba",
+  "zarr<3",
 ]
 debug = [
   "matplotlib",
   "IPython",
 ]
+
+[dependency-groups]
+test = [
+  "msprime",
+  "pytest",
+  "pytest-cov",
+  "pytest-xdist",
+  "xarray",
+  "tomli-w",
+  # inference and debug deps needed by the test suite
+  "scipy",
+  "biotite",
+  "tsinfer>=0.5,<1",
+  "pyfaidx",
+  "numba",
+  "matplotlib",
+  "IPython",
+]
 docs = [
-  "jupyter-book==1.0.4.post1",
+  "jupyter-book<2",
   "sphinx-book-theme",
   "sphinx-copybutton",
   "sphinx-click",
-  "setuptools_scm",
-  "sphinx-argparse==0.5.2",
-  "sphinx-issues==5.0.1",
+  "sphinx-argparse",
+  "sphinx-issues",
   "IPython",
-  # docs requires running the CLI, which means we need to full inference 
-  # requirements also
+  # docs require running the CLI, which means the full inference deps are needed
   "scipy",
   "biotite",
   "tsinfer>=0.5",
   "pyfaidx",
   "numba",
+]
+lint = [
+  "ruff==0.15.1",
+  "prek==0.3.3",
+]
+packaging = [
+  "twine",
+  "validate-pyproject[all]",
+]
+dev = [
+  {include-group = "docs"},
+  {include-group = "lint"},
+  {include-group = "test"},
+  {include-group = "packaging"},
 ]
 
 [build-system]
@@ -84,4 +108,28 @@ write_to = "sc2ts/_version.py"
 
 [tool.pytest.ini_options]
 testpaths = "tests"
-addopts = "--cov=sc2ts --cov-report term-missing"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 89
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "W", "I", "N", "UP", "A", "PT"]
+fixable = ["ALL"]
+
+
+ignore = [
+    "A001", "A002", "RUF",
+    "B905", #Don't add strict=False to zips (B905)
+    "E741", # using 'l' as a variable name
+    "N806", "N802", "N803", # Various nags about uppercase vars
+    "F821", # Undefined name `List`
+    "B006", # Do not use mutable data structures for argument defaults
+    "E721", # Use `is` and `is not` for type comparisons, or `isinstance()`
+    "F841", # Local variable `shape` is assigned to but never
+    "PT018", # Assertion should be broken down into multiple parts
+    "B007", # Loop control variable `j` not used within
+    "PT006", # Wrong type passed to first argument of `pytest.mar
+    "PT007", # Wrong values type in `pytest.mark.parametrize`
+    "PT009", # Use a regular `assert` instead of unittest-style
+]

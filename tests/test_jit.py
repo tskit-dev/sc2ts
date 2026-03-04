@@ -1,7 +1,7 @@
-import numpy as np
 import msprime
-import tskit
+import numpy as np
 import numpy.testing as nt
+import tskit
 
 from sc2ts import jit
 
@@ -63,7 +63,6 @@ def multiple_trees_example_ts():
 
 
 class TestArgCounts:
-
     def test_single_tree_example(self):
         ts = single_tree_example_ts()
         c = jit.count(ts)

@@ -1,16 +1,14 @@
-import tskit
+import pathlib
+
 import numpy as np
 import pandas as pd
-
-import pathlib
+import tskit
 
 prefix = pathlib.Path("/home/jk/work/github/sc2ts-paper")
 
 orig_ts = tskit.load(prefix / "inference/results/v1-beta1/v1-beta1_2023-02-21.ts")
 recomb_df = pd.read_csv(prefix / "data/recombinants.csv").set_index("sample_id")
-strain2nodeid = dict(
-    zip(orig_ts.metadata["sc2ts"]["samples_strain"], orig_ts.samples())
-)
+strain2nodeid = dict(zip(orig_ts.metadata["sc2ts"]["samples_strain"], orig_ts.samples()))
 ba_2_sample = "SRR17461792"
 re_node = recomb_df.loc[ba_2_sample, "recombinant"]
 re_node_children = orig_ts.edges_child[orig_ts.edges_parent == re_node]

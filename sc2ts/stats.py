@@ -1,8 +1,8 @@
-from . import core
-
 import numpy as np
 import pandas as pd
 import tskit
+
+from . import core
 
 
 def convert_date(ts, time_array):

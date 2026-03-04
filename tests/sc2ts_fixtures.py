@@ -1,25 +1,26 @@
 import dataclasses
+import gzip
+import os
 import pathlib
 import shutil
-import gzip
-import tskit
 
 import numpy as np
 import pandas as pd
 import pytest
+import tskit
 
 import sc2ts
-from sc2ts import cli
-from sc2ts import data_import
-from sc2ts import jit
+from sc2ts import data_import, jit
 from sc2ts import inference as si
 
 
 @pytest.fixture
 def fx_data_cache():
-    cache_path = pathlib.Path("tests/data/cache")
-    if not cache_path.exists():
-        cache_path.mkdir()
+    # This the simplest way to avoid race conditions between parallel
+    # pytest workers - we just make a cache per worker
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    cache_path = pathlib.Path("tests/data/cache") / worker
+    cache_path.mkdir(parents=True, exist_ok=True)
     return cache_path
 
 
@@ -103,9 +104,7 @@ def fx_dataset(tmp_path, fx_data_cache, fx_alignments_fasta, fx_metadata_df):
         # Use an awkward chunk size here to make sure we're hitting across
         # chunk stuff by default
         sc2ts.Dataset.new(fs_path, samples_chunk_size=7)
-        sc2ts.Dataset.append_alignments(
-            fs_path, encoded_alignments(fx_alignments_fasta)
-        )
+        sc2ts.Dataset.append_alignments(fs_path, encoded_alignments(fx_alignments_fasta))
         sc2ts.Dataset.add_metadata(fs_path, fx_metadata_df)
         sc2ts.Dataset.create_zip(fs_path, cache_path)
     return sc2ts.Dataset(cache_path, date_field="date")
@@ -171,7 +170,8 @@ def fx_ts_map(tmp_path, fx_data_cache, fx_dataset, fx_match_db):
                 **extra_kwargs,
             )
             print(
-                f"INFERRED {date} nodes={last_ts.num_nodes} mutations={last_ts.num_mutations}"
+                f"INFERRED {date} nodes={last_ts.num_nodes} "
+                f"mutations={last_ts.num_mutations}"
             )
             cache_path = fx_data_cache / f"{date}.ts"
             last_ts.dump(cache_path)
@@ -290,7 +290,8 @@ def recombinant_example_2(tmp_path, fx_ts_map, fx_dataset, ds_path):
     ts_path = tmp_path / "intermediate.ts"
     ts.dump(ts_path)
 
-    # Now run again with the recombinant of these two, encoding the interval in the # name
+    # Now run again with the recombinant of these two, encoding the interval
+    # in the name
     date = "2020-03-02"
     left = start + 3 + 1
     right = end - 3 + 1
@@ -368,7 +369,8 @@ def recombinant_example_3(tmp_path, fx_ts_map, fx_dataset, ds_path):
     ts_path = tmp_path / "intermediate.ts"
     ts.dump(ts_path)
 
-    # Now run again with the recombinant of these three, encoding the intervals in the name
+    # Now run again with the recombinant of these three, encoding the intervals
+    # in the name
     date = "2020-03-02"
     left = start + 3 + 1
     right = end - 3 + 1

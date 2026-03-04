@@ -1,6 +1,6 @@
 import collections.abc
-import pathlib
 import csv
+import pathlib
 
 import numpy as np
 import pyfaidx
@@ -140,4 +140,3 @@ def massage_viridian_metadata(df):
         a[~missing] = np.array(data[~missing], dtype=int)
         df[name] = a
     return df
-

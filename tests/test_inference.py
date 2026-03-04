@@ -1,22 +1,16 @@
 import dataclasses
-import collections
 import hashlib
-import logging
 import json
 
+import msprime
 import numpy as np
 import numpy.testing as nt
-import pytest
-import tsinfer
-import tskit
-import msprime
 import pandas as pd
+import pytest
+import tskit
 
 import sc2ts
-from sc2ts import debug
-from sc2ts import jit
-from sc2ts import tree_ops
-from sc2ts import validation
+from sc2ts import debug, jit, tree_ops, validation
 from sc2ts import inference as si
 
 
@@ -85,7 +79,6 @@ def test_get_group_strains(fx_ts_map):
 
 
 class TestRecombinantHandling:
-
     def test_get_recombinant_strains_ex1(self, fx_recombinant_example_1):
         d = si.get_recombinant_strains(fx_recombinant_example_1)
         assert d == {55: ["recombinant_example_1_0", "recombinant_example_1_1"]}
@@ -529,9 +522,7 @@ class TestRealData:
 
         assert np.sum(ts.nodes_time[ts.samples()] == 0) == new_samples
         for u in ts.samples()[-new_samples:]:
-            assert (
-                ts.node(u).metadata["sc2ts"]["num_missing_sites"] <= max_missing_sites
-            )
+            assert ts.node(u).metadata["sc2ts"]["num_missing_sites"] <= max_missing_sites
 
     @pytest.mark.parametrize(
         ["strain", "start", "length"],
@@ -754,8 +745,7 @@ class TestRealData:
             retro_groups = ts.metadata["sc2ts"]["retro_groups"]
             assert len(retro_groups) == 0
             assert (
-                "Skipping mean_mutations_per_sample=1.0 exceeds threshold"
-                in caplog.text
+                "Skipping mean_mutations_per_sample=1.0 exceeds threshold" in caplog.text
             )
 
     def test_2020_02_14_skip_root_mutations(
@@ -980,7 +970,6 @@ class TestRealData:
 
 
 class TestSyntheticAlignments:
-
     def test_exact_match(self, tmp_path, fx_ts_map, fx_dataset):
         # Pick two unique strains and we should match exactly with them
         strains = ["SRR11597218", "ERR4204459"]
@@ -1252,7 +1241,6 @@ class TestMatchingDetails:
 
 
 class TestRunHmm:
-
     @pytest.mark.parametrize("direction", ["F", "R", "forwards", "backwards", "", None])
     def test_bad_direction(self, fx_dataset, fx_ts_map, direction):
         strain = "SRR11597164"
@@ -1272,7 +1260,6 @@ class TestRunHmm:
 
 
 class TestCharacteriseRecombinants:
-
     def test_example_1(self, fx_ts_map):
         ts, s = recombinant_example_1(fx_ts_map)
 
@@ -1389,7 +1376,6 @@ class TestCharacteriseRecombinants:
 
 
 class TestExtractHaplotypes:
-
     @pytest.mark.parametrize(
         ["samples", "result"],
         [
@@ -1536,9 +1522,7 @@ class TestMapParsimony:
         ts = fx_ts_map["2020-02-13"]
         sites = [1547, 3951, 3952, 3953]
         result = si.map_parsimony(ts, fx_dataset, sites)
-        validation.validate(
-            result.tree_sequence, fx_dataset, deletions_as_missing=False
-        )
+        validation.validate(result.tree_sequence, fx_dataset, deletions_as_missing=False)
 
     def test_provenance(self, fx_ts_map, fx_dataset):
         ts = fx_ts_map["2020-02-13"]
@@ -1614,13 +1598,10 @@ class TestAppendExactMatches:
 
 
 class TestMinimiseMetadata:
-
     def test_equivalent(self, fx_ts_map):
         ts = fx_ts_map["2020-02-13"]
         tsp = si.minimise_metadata(ts)
-        ts.tables.assert_equals(
-            tsp.tables, ignore_metadata=True, ignore_provenance=True
-        )
+        ts.tables.assert_equals(tsp.tables, ignore_metadata=True, ignore_provenance=True)
 
     def test_properties(self, fx_ts_map):
         ts = fx_ts_map["2020-02-13"]
@@ -1672,7 +1653,6 @@ class TestMinimiseMetadata:
 
 
 class TestPushUpRecombinantMutations:
-
     def test_no_recombinants(self, fx_ts_map):
         ts = fx_ts_map["2020-02-13"]
         tsp = si.push_up_unary_recombinant_mutations(ts)
@@ -1811,7 +1791,6 @@ class TestRematchRecombinants:
 
 
 class TestRematchRecombinantsLbs:
-
     def test_bad_node(self, fx_recombinant_example_1_info):
         info = fx_recombinant_example_1_info
         base_ts = tskit.load(info.base_ts)
