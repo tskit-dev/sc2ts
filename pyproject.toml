@@ -12,7 +12,6 @@ dependencies = [
   "tszip",
   "pandas",
   "tqdm",
-  "zarr<3",
   "click>=8.2",
   # Not strictly needed for base functionality, but easier to include
   # as imported by the CLI
@@ -37,6 +36,7 @@ inference = [
   "tsinfer>=0.5",
   "pyfaidx",
   "numba",
+  "zarr<3",
 ]
 debug = [
   "matplotlib",
