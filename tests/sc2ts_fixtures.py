@@ -170,7 +170,8 @@ def fx_ts_map(tmp_path, fx_data_cache, fx_dataset, fx_match_db):
                 **extra_kwargs,
             )
             print(
-                f"INFERRED {date} nodes={last_ts.num_nodes} mutations={last_ts.num_mutations}"
+                f"INFERRED {date} nodes={last_ts.num_nodes} "
+                f"mutations={last_ts.num_mutations}"
             )
             cache_path = fx_data_cache / f"{date}.ts"
             last_ts.dump(cache_path)
@@ -289,7 +290,8 @@ def recombinant_example_2(tmp_path, fx_ts_map, fx_dataset, ds_path):
     ts_path = tmp_path / "intermediate.ts"
     ts.dump(ts_path)
 
-    # Now run again with the recombinant of these two, encoding the interval in the # name
+    # Now run again with the recombinant of these two, encoding the interval
+    # in the name
     date = "2020-03-02"
     left = start + 3 + 1
     right = end - 3 + 1
@@ -367,7 +369,8 @@ def recombinant_example_3(tmp_path, fx_ts_map, fx_dataset, ds_path):
     ts_path = tmp_path / "intermediate.ts"
     ts.dump(ts_path)
 
-    # Now run again with the recombinant of these three, encoding the intervals in the name
+    # Now run again with the recombinant of these three, encoding the intervals
+    # in the name
     date = "2020-03-02"
     left = start + 3 + 1
     right = end - 3 + 1

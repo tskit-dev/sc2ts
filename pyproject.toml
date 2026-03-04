@@ -133,8 +133,4 @@ ignore = [
     "PT006", # Wrong type passed to first argument of `pytest.mar
     "PT007", # Wrong values type in `pytest.mark.parametrize`
     "PT009", # Use a regular `assert` instead of unittest-style
-    # FIXME - line too long in debug.py
-    "E501",
-
 ]
-
