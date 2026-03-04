@@ -3,16 +3,22 @@ import itertools
 import numpy as np
 import numpy.testing as nt
 import pytest
-import sgkit
+import xarray as xr
 import xarray.testing as xt
 
 import sc2ts
 from sc2ts import data_import, jit
 
 
+# Partial copy of the load_dataset function.
+def load_dataset(store):
+    ds = xr.open_zarr(store, concat_characters=False)
+    return ds
+
+
 def assert_datasets_equal(ds1, ds2):
-    sg_ds1 = sgkit.load_dataset(ds1.path)
-    sg_ds2 = sgkit.load_dataset(ds2.path)
+    sg_ds1 = load_dataset(ds1.path)
+    sg_ds2 = load_dataset(ds2.path)
     xt.assert_equal(sg_ds1, sg_ds2)
 
 
@@ -38,7 +44,7 @@ class TestCreateDataset:
     def test_new(self, tmp_path):
         path = tmp_path / "dataset.vcz"
         sc2ts.Dataset.new(path)
-        sg_ds = sgkit.load_dataset(path)
+        sg_ds = load_dataset(path)
         assert dict(sg_ds.sizes) == {
             "variants": 29903,
             "samples": 0,
@@ -69,7 +75,7 @@ class TestCreateDataset:
 
         sc2ts.Dataset.append_alignments(path, alignments)
 
-        sg_ds = sgkit.load_dataset(path)
+        sg_ds = load_dataset(path)
         assert dict(sg_ds.sizes) == {
             "variants": 29903,
             "samples": num_samples,
@@ -117,7 +123,7 @@ class TestCreateDataset:
         for k, v in alignments.items():
             sc2ts.Dataset.append_alignments(path, {k: v})
 
-        sg_ds = sgkit.load_dataset(path)
+        sg_ds = load_dataset(path)
         assert dict(sg_ds.sizes) == {
             "variants": 29903,
             "samples": num_samples,
@@ -140,7 +146,7 @@ class TestCreateDataset:
             path, fx_metadata_df, field_descriptions=field_descriptions
         )
 
-        sg_ds = sgkit.load_dataset(path)
+        sg_ds = load_dataset(path)
         assert dict(sg_ds.sizes) == {
             "variants": 29903,
             "samples": len(fx_encoded_alignments),
@@ -181,8 +187,8 @@ class TestCreateDataset:
         path = tmp_path / "dataset.vcz"
         sample_id = fx_dataset.sample_id[::-1]
         fx_dataset.copy(path, sample_id=sample_id)
-        sg_ds2 = sgkit.load_dataset(path).set_index({"samples": "sample_id"})
-        sg_ds1 = sgkit.load_dataset(fx_dataset.path).set_index({"samples": "sample_id"})
+        sg_ds2 = load_dataset(path).set_index({"samples": "sample_id"})
+        sg_ds1 = load_dataset(fx_dataset.path).set_index({"samples": "sample_id"})
         permuted = sg_ds1.sel(samples=sample_id)
         xt.assert_equal(permuted, sg_ds2)
 
@@ -218,8 +224,8 @@ class TestCreateDataset:
     def test_copy_subset(self, tmp_path, fx_dataset, sample_id):
         path = tmp_path / "dataset.vcz"
         fx_dataset.copy(path, sample_id=sample_id)
-        sg_ds2 = sgkit.load_dataset(path).set_index({"samples": "sample_id"})
-        sg_ds1 = sgkit.load_dataset(fx_dataset.path).set_index({"samples": "sample_id"})
+        sg_ds2 = load_dataset(path).set_index({"samples": "sample_id"})
+        sg_ds1 = load_dataset(fx_dataset.path).set_index({"samples": "sample_id"})
         permuted = sg_ds1.sel(samples=sample_id)
         xt.assert_equal(permuted, sg_ds2)
 
