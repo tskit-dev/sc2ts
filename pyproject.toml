@@ -122,15 +122,15 @@ ignore = [
     "B905", #Don't add strict=False to zips (B905)
     "E741", # using 'l' as a variable name
     "N806", "N802", "N803", # Various nags about uppercase vars
-    "F821", # Undefined name `List`  
-    "B006", # Do not use mutable data structures for argument defaults 
+    "F821", # Undefined name `List`
+    "B006", # Do not use mutable data structures for argument defaults
     "E721", # Use `is` and `is not` for type comparisons, or `isinstance()`
-    "F841", # Local variable `shape` is assigned to but never 
+    "F841", # Local variable `shape` is assigned to but never
     "PT018", # Assertion should be broken down into multiple parts
-    "B007", # Loop control variable `j` not used within 
+    "B007", # Loop control variable `j` not used within
     "PT006", # Wrong type passed to first argument of `pytest.mar
-    "PT007", # Wrong values type in `pytest.mark.parametrize` 
-    "PT009", # Use a regular `assert` instead of unittest-style 
+    "PT007", # Wrong values type in `pytest.mark.parametrize`
+    "PT009", # Use a regular `assert` instead of unittest-style
     # FIXME - line too long in debug.py
     "E501",
 
