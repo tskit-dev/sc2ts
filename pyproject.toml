@@ -29,6 +29,8 @@ GitHub = "https://github.com/tskit-dev/sc2ts/"
 [project.scripts]
 sc2ts = "sc2ts.cli:cli"
 
+# NOTE: project.optional-dependencies and the dependency-groups below
+# cannot be deduplicated as they serve different purposes.
 [project.optional-dependencies]
 inference = [
   "scipy",
