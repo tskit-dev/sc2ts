@@ -3293,7 +3293,7 @@ requires-dist = [
     { name = "scipy", marker = "extra == 'inference'" },
     { name = "tomli" },
     { name = "tqdm" },
-    { name = "tsinfer", marker = "extra == 'inference'", specifier = ">=0.5" },
+    { name = "tsinfer", marker = "extra == 'inference'", specifier = ">=0.5,<1" },
     { name = "tskit", specifier = ">=1.0.0" },
     { name = "tszip" },
     { name = "zarr", marker = "extra == 'inference'", specifier = "<3" },
@@ -3322,6 +3322,7 @@ dev = [
     { name = "sphinx-issues" },
     { name = "tomli-w" },
     { name = "tsinfer", specifier = ">=0.5" },
+    { name = "tsinfer", specifier = ">=0.5,<1" },
     { name = "twine" },
     { name = "validate-pyproject", extras = ["all"] },
     { name = "xarray" },
@@ -3360,7 +3361,7 @@ test = [
     { name = "pytest-xdist" },
     { name = "scipy" },
     { name = "tomli-w" },
-    { name = "tsinfer", specifier = ">=0.5" },
+    { name = "tsinfer", specifier = ">=0.5,<1" },
     { name = "xarray" },
 ]
 

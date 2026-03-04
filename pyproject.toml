@@ -35,7 +35,7 @@ sc2ts = "sc2ts.cli:cli"
 inference = [
   "scipy",
   "biotite",
-  "tsinfer>=0.5",
+  "tsinfer>=0.5,<1",
   "pyfaidx",
   "numba",
   "zarr<3",
@@ -56,7 +56,7 @@ test = [
   # inference and debug deps needed by the test suite
   "scipy",
   "biotite",
-  "tsinfer>=0.5",
+  "tsinfer>=0.5,<1",
   "pyfaidx",
   "numba",
   "matplotlib",
