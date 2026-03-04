@@ -1,5 +1,6 @@
 import dataclasses
 import gzip
+import os
 import pathlib
 import shutil
 
@@ -15,9 +16,11 @@ from sc2ts import inference as si
 
 @pytest.fixture
 def fx_data_cache():
-    cache_path = pathlib.Path("tests/data/cache")
-    if not cache_path.exists():
-        cache_path.mkdir()
+    # This the simplest way to avoid race conditions between parallel
+    # pytest workers - we just make a cache per worker
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    cache_path = pathlib.Path("tests/data/cache") / worker
+    cache_path.mkdir(parents=True, exist_ok=True)
     return cache_path
 
 

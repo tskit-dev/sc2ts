@@ -13,7 +13,6 @@ jobs:
     with:
       os: ${{ matrix.os }}
       python-version: ${{ matrix.python }}
-      pyproject-directory: .
       coverage-directory: sc2ts
     secrets: inherit
     strategy:
