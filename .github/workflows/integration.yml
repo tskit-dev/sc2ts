@@ -53,8 +53,6 @@ jobs:
         with:
           python-version: "3.11"
           version: "0.8.15"
-      - name: Install package only
-        run: uv pip install -e .
       - name: Run tests
         run: |
           # Minimal deps only; avoid picking up conftest and fixtures
