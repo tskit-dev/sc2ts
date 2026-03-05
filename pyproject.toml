@@ -6,7 +6,7 @@ license = {file = "LICENSE"}
 authors = [
   {name = "Jerome Kelleher", email = "jerome.kelleher@bdi.ox.ac.uk"},
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "tskit>=1.0.0",
   "tszip",
@@ -38,7 +38,7 @@ inference = [
   "tsinfer>=0.5,<1",
   "pyfaidx",
   "numba",
-  "zarr<3",
+  "zarr<3", # No point in supporting zarr3 until tsinfer updated
 ]
 debug = [
   "matplotlib",
