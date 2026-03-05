@@ -16,3 +16,4 @@ parts:
   - caption: Misc
     chapters:
       - file: development
+      - file: CHANGELOG
