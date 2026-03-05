@@ -1,20 +1,23 @@
 
 # Development
 
-To run the development dependencies use
+See the [tskit developer documentation](https://tskit.dev/tskit/docs/stable/development.html)
+for the general development workflow (git, prek, testing, documentation).
+
+Install development dependencies with:
 
 ```
-python3 -m pip install .[dev]
+$ uv sync
 ```
 
-To run the unit tests, use
+Run the unit tests with:
 
 ```
-python3 -m pytest
+$ uv run pytest
 ```
 
-You may need to regenerate some cached test fixtures occasionaly (particularly
-if getting cryptic errors when running the test suite). To do this, run
+You may need to regenerate some cached test fixtures occasionally (particularly
+if getting cryptic errors when running the test suite). To do this, run:
 
 ```
 rm -fR tests/data/cache/
