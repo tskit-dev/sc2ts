@@ -105,6 +105,8 @@ packages = ["sc2ts"]
 
 [tool.setuptools_scm]
 write_to = "sc2ts/_version.py"
+local_scheme = "no-local-version"
+
 
 [tool.pytest.ini_options]
 testpaths = "tests"
