@@ -15,7 +15,6 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
           version: "0.10.0"
       - run: uv build
       - uses: actions/upload-artifact@v4.6.1
