@@ -6,4 +6,4 @@ on:
 
 jobs:
   lint:
-    uses: tskit-dev/.github/.github/workflows/lint.yml@v14
+    uses: tskit-dev/.github/.github/workflows/lint.yml@v15
