@@ -16,6 +16,7 @@ run_id="ex1"
 # on shared file systems
 results_dir = "example_inference/"
 log_dir = "example_inference/"
+# NB, we recommend setting matches_dir to local (not network) storage
 matches_dir= "example_inference/"
 # This is full debug output, which is verbose (but useful!)
 log_level = 2
