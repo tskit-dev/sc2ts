@@ -913,7 +913,9 @@ class ArgInfo:
             breakpoint_intervals.append(node_md["breakpoint_intervals"])
 
             # Only deal with 2 parents recombs for now.
-            assert self.nodes_num_parents[u] == 2
+            if self.nodes_num_parents[u] > 2:
+                logger.warning(f"RE: {u} has more than two parents. Skipping.")
+                continue
             # assert len(set(hmm_matches)) == 1
             # assert len(set(breakpoint_intervals)) == 1
             hmm_match = hmm_matches[0]
