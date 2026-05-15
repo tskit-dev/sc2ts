@@ -258,7 +258,7 @@ class Dataset(collections.abc.Mapping):
         self.date_field = date_field
         self.path = pathlib.Path(path)
         if self.path.suffix == ".zip":
-            self.store = zarr.ZipStore(path)
+            self.store = zarr.ZipStore(path, mode="r")
         else:
             self.store = zarr.DirectoryStore(path)
         self.root = zarr.open(self.store, mode="r")
