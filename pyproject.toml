@@ -90,6 +90,7 @@ dev = [
   {include-group = "lint"},
   {include-group = "test"},
   {include-group = "packaging"},
+  "jupyter",
 ]
 
 [build-system]
