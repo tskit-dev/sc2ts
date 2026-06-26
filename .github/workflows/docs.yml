@@ -8,4 +8,4 @@ on:
 
 jobs:
   docs:
-    uses: tskit-dev/.github/.github/workflows/docs.yml@v15
+    uses: tskit-dev/.github/.github/workflows/docs.yml@v17
