@@ -1,10 +1,16 @@
 
 # This is a path to the dataset, in VCZ format.
 dataset="viridian_mafft_2024-10-14_v1.vcz.zip"
-# The metadata field used for dates. For the Viridian dataset, this is 
-# "Date_tree" (which means, "date used to partition samples when building 
+# The metadata field used for dates. For the Viridian dataset, this is
+# "Date_tree" (which means, "date used to partition samples when building
 # the Viridian tree")
 date_field="Date_tree"
+
+# Optional: path to a reference genome FASTA. If omitted, the built-in
+# SARS-CoV-2 reference (MN908947, Wuhan/Hu-1/2019) is used. Supply this to run
+# inference on another genome; it must be the same reference the dataset was
+# built with (see "sc2ts import-alignments --reference").
+# reference_fasta="reference.fasta"
 
 # The run_id is a prefix added to all output files. This is useful when 
 # running lots of different parameter combinations.

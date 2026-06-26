@@ -34,16 +34,39 @@ data_path = pathlib.Path(__file__).parent / "data"
 __cached_reference = None
 
 
-def get_reference_sequence(as_array=False):
-    global __cached_reference
-    if __cached_reference is None:
-        reader = pyfaidx.Fasta(str(data_path / "reference.fasta"))
-        __cached_reference = reader[core.REFERENCE_GENBANK]
+def get_reference_sequence(path=None, as_array=False):
+    """
+    Return the reference sequence with an "X" prepended at position 0 so that
+    the genome uses 1-based coordinates. If ``path`` is None the built-in
+    SARS-CoV-2 reference is used; otherwise the first record in the FASTA at
+    ``path`` is used.
+    """
+    if path is None:
+        global __cached_reference
+        if __cached_reference is None:
+            reader = pyfaidx.Fasta(str(data_path / "reference.fasta"))
+            __cached_reference = reader[core.REFERENCE_GENBANK]
+        reference = __cached_reference
+    else:
+        reader = pyfaidx.Fasta(str(path))
+        reference = reader[list(reader.keys())[0]]
     if as_array:
-        h = np.array(__cached_reference).astype(str)
+        h = np.array(reference).astype(str)
         return np.append(["X"], h)
     else:
-        return "X" + str(__cached_reference)
+        return "X" + str(reference)
+
+
+def get_reference_id(path=None):
+    """
+    Return the identifier for the reference genome. If ``path`` is None this is
+    the built-in SARS-CoV-2 GenBank accession; otherwise it is the name of the
+    first record in the FASTA at ``path``.
+    """
+    if path is None:
+        return core.REFERENCE_GENBANK
+    reader = pyfaidx.Fasta(str(path))
+    return list(reader.keys())[0]
 
 
 __cached_genes = None

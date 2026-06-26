@@ -40,6 +40,27 @@ def test_massaged_viridian_metadata(fx_raw_viridian_metadata_df):
     assert np.sum(df["Genbank_N"]) > 0
 
 
+class TestReferenceSequence:
+    def test_builtin_default(self):
+        ref = data_import.get_reference_sequence()
+        assert ref[0] == "X"
+        assert data_import.get_reference_id() == "MN908947"
+
+    def test_custom_fasta(self, tmp_path):
+        seq = "ACGTACGTACGT"
+        fasta = tmp_path / "ref.fasta"
+        fasta.write_text(f">chr_test some description\n{seq}\n")
+        assert data_import.get_reference_sequence(str(fasta)) == "X" + seq
+        assert data_import.get_reference_id(str(fasta)) == "chr_test"
+
+    def test_custom_fasta_as_array(self, tmp_path):
+        seq = "ACGTACGTACGT"
+        fasta = tmp_path / "ref.fasta"
+        fasta.write_text(f">chr_test\n{seq}\n")
+        ref = data_import.get_reference_sequence(str(fasta), as_array=True)
+        nt.assert_array_equal(ref, ["X"] + list(seq))
+
+
 class TestCreateDataset:
     def test_new(self, tmp_path):
         path = tmp_path / "dataset.vcz"
@@ -53,6 +74,29 @@ class TestCreateDataset:
             "alleles": 16,
         }
         # TODO check various properties of the dataset
+
+    def test_new_custom_genome(self, tmp_path):
+        path = tmp_path / "dataset.vcz"
+        seq = "ACGTACGTACGTAACCGGTT"
+        sc2ts.Dataset.new(path, sequence_length=len(seq) + 1, contig_id="chr_test")
+        sg_ds = load_dataset(path)
+        assert dict(sg_ds.sizes) == {
+            "variants": len(seq),
+            "samples": 0,
+            "ploidy": 1,
+            "contigs": 1,
+            "alleles": 16,
+        }
+        assert sg_ds["contig_id"].values[0] == "chr_test"
+        assert sg_ds["contig_length"].values[0] == len(seq) + 1
+
+        # Length-M encoded alignments round-trip through append.
+        h = jit.encode_alleles(np.array(list(seq)))
+        sc2ts.Dataset.append_alignments(path, {"s0": h})
+        sg_ds = load_dataset(path)
+        assert sg_ds.sizes["samples"] == 1
+        H = sg_ds["call_genotype"].values.squeeze(2).T
+        nt.assert_array_equal(h, H[0])
 
     @pytest.mark.parametrize(
         ["num_samples", "chunk_size"],

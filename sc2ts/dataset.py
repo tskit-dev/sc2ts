@@ -469,14 +469,24 @@ class Dataset(collections.abc.Mapping):
         self.copy(path, sample_id=sample_id[index], show_progress=show_progress)
 
     @staticmethod
-    def new(path, samples_chunk_size=None, variants_chunk_size=None):
+    def new(
+        path,
+        samples_chunk_size=None,
+        variants_chunk_size=None,
+        sequence_length=None,
+        contig_id=None,
+    ):
         if samples_chunk_size is None:
             samples_chunk_size = 10_000
         if variants_chunk_size is None:
             variants_chunk_size = 100
+        if sequence_length is None:
+            sequence_length = core.REFERENCE_SEQUENCE_LENGTH
+        if contig_id is None:
+            contig_id = core.REFERENCE_STRAIN
 
         logger.info(f"Creating new dataset at {path}")
-        L = core.REFERENCE_SEQUENCE_LENGTH - 1
+        L = sequence_length - 1
         N = 0  # Samples must be added
         store = zarr.DirectoryStore(path)
         root = zarr.open(store, mode="w")
@@ -508,7 +518,7 @@ class Dataset(collections.abc.Mapping):
             dtype="str",
             compressor=DEFAULT_ZARR_COMPRESSOR,
         )
-        z[0] = core.REFERENCE_STRAIN
+        z[0] = contig_id
         z.attrs["_ARRAY_DIMENSIONS"] = ["contigs"]
 
         z = root.empty(

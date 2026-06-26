@@ -127,15 +127,29 @@ def setup_logging(verbosity, log_file=None, date=None):
         "If true, initialise a new dataset. WARNING! This will erase an existing store"
     ),
 )
+@click.option(
+    "--reference",
+    type=click.Path(exists=True, dir_okay=False),
+    default=None,
+    help="Reference FASTA defining the genome (default: built-in SARS-CoV-2)",
+)
 @progress
 @verbose
-def import_alignments(dataset, fastas, initialise, progress, verbose):
+def import_alignments(dataset, fastas, initialise, reference, progress, verbose):
     """
     Import the alignments from all FASTAS into the dataset
     """
     setup_logging(verbose)
     if initialise:
-        sc2ts.Dataset.new(dataset)
+        if reference is None:
+            sc2ts.Dataset.new(dataset)
+        else:
+            ref_seq = data_import.get_reference_sequence(reference)
+            sc2ts.Dataset.new(
+                dataset,
+                sequence_length=len(ref_seq),
+                contig_id=data_import.get_reference_id(reference),
+            )
 
     f_bar = tqdm.tqdm(sorted(fastas), desc="Files", disable=not progress, position=0)
     for fasta_path in f_bar:
@@ -304,6 +318,7 @@ def infer(config_file, start, stop, force):
 
     ts_file_pattern = str(results_dir / f"{run_id}_{{date}}.ts")
     exclude_sites = config.pop("exclude_sites", [])
+    reference_fasta = config.pop("reference_fasta", None)
 
     if start is None:
         if match_db.exists() and not force:
@@ -311,7 +326,7 @@ def infer(config_file, start, stop, force):
                 f"Do you want to overwrite MatchDB at {match_db}",
                 abort=True,
             )
-        init_ts = si.initial_ts(exclude_sites)
+        init_ts = si.initial_ts(exclude_sites, reference_fasta=reference_fasta)
         si.MatchDb.initialise(match_db)
         base_ts = results_dir / f"{run_id}_init.ts"
         init_ts.dump(base_ts)
@@ -340,6 +355,16 @@ def infer(config_file, start, stop, force):
     if len(config) > 0:
         raise ValueError(f"Unknown keys in config: {list(config.keys())}")
     ds = sc2ts.Dataset(dataset, date_field=date_field)
+
+    if reference_fasta is not None:
+        reference_length = len(data_import.get_reference_sequence(reference_fasta))
+        contig_length = int(ds["contig_length"][0])
+        if reference_length != contig_length:
+            raise ValueError(
+                f"reference_fasta length ({reference_length}) does not match the "
+                f"dataset contig length ({contig_length}). The reference_fasta must "
+                "be the same genome the dataset was built with."
+            )
 
     for date in np.unique(ds.metadata.sample_date):
         if date >= stop:

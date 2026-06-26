@@ -160,6 +160,26 @@ class TestInitialTs:
         }
         assert node.flags == sc2ts.NODE_IS_REFERENCE
 
+    def test_custom_reference_fasta(self, tmp_path):
+        seq = "ACGTACGTACGTAACCGGTT"
+        fasta = tmp_path / "ref.fasta"
+        fasta.write_text(f">chr_test some description\n{seq}\n")
+
+        ts = si.initial_ts(reference_fasta=str(fasta))
+        # sequence_length and number of sites are driven by the reference length
+        # (with the "X" prepended at position 0 for 1-based coordinates).
+        assert ts.sequence_length == len(seq) + 1
+        assert ts.num_sites == len(seq)
+        assert ts.reference_sequence.data == "X" + seq
+        # Ancestral states match the reference (1-based coordinates).
+        for site in ts.sites():
+            assert site.ancestral_state == seq[int(site.position) - 1]
+        # Identity metadata is derived from the FASTA header, not SARS-CoV-2.
+        assert ts.reference_sequence.metadata["genbank_id"] == "chr_test"
+        node = ts.node(1)
+        assert node.metadata["strain"] == "chr_test"
+        assert node.metadata["date"] == "1900-01-01"
+
 
 class TestMatchTsinfer:
     def match_tsinfer(self, samples, ts, mirror_coordinates=False, **kwargs):
