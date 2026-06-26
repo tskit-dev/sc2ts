@@ -6,6 +6,9 @@ on:
     branches: [main, test]
   merge_group:
 
+permissions:
+  contents: read
+
 jobs:
   packaging:
     name: Python packaging
@@ -18,7 +21,10 @@ jobs:
       os: ${{ matrix.os }}
       python-version: ${{ matrix.python }}
       coverage-directory: sc2ts
-    secrets: inherit
+    # The trusted first-party tskit-dev/python-tests reusable workflow reads
+    # secrets.CODECOV_TOKEN directly without declaring it in its workflow_call
+    # interface, so an explicit secrets map would error; inherit is required.
+    secrets: inherit  # zizmor: ignore[secrets-inherit]
     strategy:
       matrix:
         python: [3.11, 3.13]
