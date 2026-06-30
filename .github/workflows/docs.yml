@@ -8,4 +8,6 @@ on:
 
 jobs:
   docs:
-    uses: tskit-dev/.github/.github/workflows/docs.yml@v17
+    permissions:
+      contents: read
+    uses: tskit-dev/.github/.github/workflows/docs.yml@v19

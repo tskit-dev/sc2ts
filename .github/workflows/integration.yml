@@ -6,13 +6,18 @@ on:
     branches: [main, test]
   merge_group:
 
+permissions:
+  contents: read
+
 jobs:
   end-to-end:
     name: End to end tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
         with:
           python-version: "3.11"
           version: "0.10.0"
@@ -48,8 +53,10 @@ jobs:
     name: Bare API tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39  # v8.2.0
         with:
           python-version: "3.11"
           version: "0.10.0"
