@@ -115,6 +115,17 @@ def setup_logging(verbosity, log_file=None, date=None):
         logger.addHandler(warn_handler)
 
 
+def get_reference(reference_fasta):
+    """
+    Return ``(reference_id, reference_sequence)`` for the supplied reference
+    FASTA, or the built-in SARS-CoV-2 reference when ``reference_fasta`` is None.
+    """
+    if reference_fasta is None:
+        _, sequence = data_import.read_fasta(data_import.data_path / "reference.fasta")
+        return core.REFERENCE_STRAIN, sequence
+    return data_import.read_fasta(reference_fasta)
+
+
 @click.command()
 @click.argument("dataset", type=click.Path(dir_okay=True, file_okay=False))
 @click.argument("fastas", type=click.Path(exists=True, dir_okay=False), nargs=-1)
@@ -141,15 +152,12 @@ def import_alignments(dataset, fastas, initialise, reference, progress, verbose)
     """
     setup_logging(verbose)
     if initialise:
-        if reference is None:
-            sc2ts.Dataset.new(dataset)
-        else:
-            ref_seq = data_import.get_reference_sequence(reference)
-            sc2ts.Dataset.new(
-                dataset,
-                sequence_length=len(ref_seq),
-                contig_id=data_import.get_reference_id(reference),
-            )
+        reference_id, reference_sequence = get_reference(reference)
+        sc2ts.Dataset.new(
+            dataset,
+            sequence_length=len(reference_sequence),
+            contig_id=reference_id,
+        )
 
     f_bar = tqdm.tqdm(sorted(fastas), desc="Files", disable=not progress, position=0)
     for fasta_path in f_bar:
@@ -319,6 +327,14 @@ def infer(config_file, start, stop, force):
     ts_file_pattern = str(results_dir / f"{run_id}_{{date}}.ts")
     exclude_sites = config.pop("exclude_sites", [])
     reference_fasta = config.pop("reference_fasta", None)
+    reference_date = config.pop("reference_date", None)
+
+    reference_id, reference_sequence = get_reference(reference_fasta)
+    if reference_fasta is None:
+        if reference_date is None:
+            reference_date = core.REFERENCE_DATE
+    elif reference_date is None:
+        raise ValueError("reference_date must be set when reference_fasta is given")
 
     if start is None:
         if match_db.exists() and not force:
@@ -326,7 +342,12 @@ def infer(config_file, start, stop, force):
                 f"Do you want to overwrite MatchDB at {match_db}",
                 abort=True,
             )
-        init_ts = si.initial_ts(exclude_sites, reference_fasta=reference_fasta)
+        init_ts = si.initial_ts(
+            reference_sequence=reference_sequence,
+            reference_id=reference_id,
+            reference_date=reference_date,
+            problematic_sites=exclude_sites,
+        )
         si.MatchDb.initialise(match_db)
         base_ts = results_dir / f"{run_id}_init.ts"
         init_ts.dump(base_ts)
@@ -357,7 +378,7 @@ def infer(config_file, start, stop, force):
     ds = sc2ts.Dataset(dataset, date_field=date_field)
 
     if reference_fasta is not None:
-        reference_length = len(data_import.get_reference_sequence(reference_fasta))
+        reference_length = len(reference_sequence)
         contig_length = int(ds["contig_length"][0])
         if reference_length != contig_length:
             raise ValueError(

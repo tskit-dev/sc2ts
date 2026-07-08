@@ -7,10 +7,13 @@ dataset="viridian_mafft_2024-10-14_v1.vcz.zip"
 date_field="Date_tree"
 
 # Optional: path to a reference genome FASTA. If omitted, the built-in
-# SARS-CoV-2 reference (MN908947, Wuhan/Hu-1/2019) is used. Supply this to run
-# inference on another genome; it must be the same reference the dataset was
-# built with (see "sc2ts import-alignments --reference").
+# SARS-CoV-2 reference (Wuhan/Hu-1/2019) is used. Supply this to run inference
+# on another genome; it must be the same reference the dataset was built with
+# (see "sc2ts import-alignments --reference"). When set, reference_date is
+# required: it is the date assigned to the reference (time zero), and it is up
+# to you to ensure it precedes all sample dates.
 # reference_fasta="reference.fasta"
+# reference_date="1900-01-01"
 
 # The run_id is a prefix added to all output files. This is useful when 
 # running lots of different parameter combinations.

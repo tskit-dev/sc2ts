@@ -25,7 +25,7 @@ import tsinfer
 import tskit
 import tszip
 
-from . import core, data_import, jit, stats, tree_ops
+from . import core, jit, stats, tree_ops
 from . import dataset as _dataset
 
 logger = logging.getLogger(__name__)
@@ -264,22 +264,13 @@ def mirror_ts_coordinates(ts):
     return tables.tree_sequence()
 
 
-def initial_ts(problematic_sites=None, reference_fasta=None):
+def initial_ts(
+    *, reference_sequence, reference_id, reference_date, problematic_sites=None
+):
     if problematic_sites is None:
         problematic_sites = []
-    reference = data_import.get_reference_sequence(reference_fasta)
+    reference = reference_sequence
     L = len(reference)
-    if reference_fasta is None:
-        genbank_id = core.REFERENCE_GENBANK
-        reference_strain = core.REFERENCE_STRAIN
-        reference_date = core.REFERENCE_DATE
-    else:
-        contig_id = data_import.get_reference_id(reference_fasta)
-        genbank_id = contig_id
-        reference_strain = contig_id
-        # Generic epoch for non-SARS-CoV-2 genomes: the reference defines time
-        # zero, and this just needs to be a valid date preceding all samples.
-        reference_date = core.GENERIC_REFERENCE_DATE
     problematic_sites = set(problematic_sites)
 
     logger.info(f"Masking out {len(problematic_sites)} sites")
@@ -291,7 +282,6 @@ def initial_ts(problematic_sites=None, reference_fasta=None):
     base_schema = tskit.MetadataSchema.permissive_json().schema
     tables.reference_sequence.metadata_schema = tskit.MetadataSchema(base_schema)
     tables.reference_sequence.metadata = {
-        "genbank_id": genbank_id,
         "notes": "X prepended to alignment to map from 1-based to 0-based coordinates",
     }
     tables.reference_sequence.data = reference
@@ -338,7 +328,7 @@ def initial_ts(problematic_sites=None, reference_fasta=None):
         flags=core.NODE_IS_REFERENCE,
         time=0,
         metadata={
-            "strain": reference_strain,
+            "strain": reference_id,
             "date": reference_date,
             "sc2ts": {"notes": "Reference sequence"},
         },

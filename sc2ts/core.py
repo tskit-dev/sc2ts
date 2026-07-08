@@ -14,13 +14,7 @@ TIME_UNITS = "days"
 
 REFERENCE_STRAIN = "Wuhan/Hu-1/2019"
 REFERENCE_DATE = "2019-12-26"
-REFERENCE_GENBANK = "MN908947"
 REFERENCE_SEQUENCE_LENGTH = 29904
-
-# Generic time-zero epoch used as the reference date when inference is run on a
-# non-SARS-CoV-2 genome (i.e. a custom reference FASTA is supplied). It only
-# needs to be a valid date that precedes all sample dates.
-GENERIC_REFERENCE_DATE = "1900-01-01"
 
 # We omit N here as it's mapped to -1. Make "-" the 5th allele
 # as this is a valid allele for us.

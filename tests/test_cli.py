@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 import tomli_w
 import tskit
+import util
 
 import sc2ts
 from sc2ts import cli
@@ -107,6 +108,7 @@ class TestCustomReferenceGenome:
             "log_dir": str(tmp_path / "logs"),
             "matches_dir": str(tmp_path / "matches"),
             "reference_fasta": str(ref_path),
+            "reference_date": "2019-01-01",
             "extend_parameters": {"min_group_size": 1, "num_threads": 0},
         }
         config_file = tmp_path / "config.toml"
@@ -125,7 +127,12 @@ class TestCustomReferenceGenome:
 
         results_dir = tmp_path / "results" / "test"
         init_ts = tskit.load(results_dir / "test_init.ts")
-        expected = si.initial_ts(reference_fasta=str(ref_path))
+        reference_id, reference_sequence = cli.get_reference(str(ref_path))
+        expected = si.initial_ts(
+            reference_sequence=reference_sequence,
+            reference_id=reference_id,
+            reference_date="2019-01-01",
+        )
         expected.tables.assert_equals(init_ts.tables)
         # The initial ts is sized to the custom genome and labelled from it.
         assert init_ts.sequence_length == 61
@@ -152,6 +159,7 @@ class TestCustomReferenceGenome:
             "log_dir": str(tmp_path / "logs"),
             "matches_dir": str(tmp_path / "matches"),
             "reference_fasta": str(ref_path),
+            "reference_date": "2019-01-01",
             "extend_parameters": {},
         }
         config_file = tmp_path / "config.toml"
@@ -326,7 +334,7 @@ class TestInfer:
         assert result.exit_code == 0
         init_ts_path = tmp_path / "results" / "test" / "test_init.ts"
         init_ts = tskit.load(init_ts_path)
-        other_ts = si.initial_ts()
+        other_ts = util.initial_ts()
         other_ts.tables.assert_equals(init_ts.tables)
         match_db_path = tmp_path / "matches" / "test.matches.db"
         match_db = si.MatchDb(match_db_path)
@@ -344,7 +352,7 @@ class TestInfer:
         assert result.exit_code == 0
         init_ts_path = tmp_path / "results" / "test" / "test_init.ts"
         init_ts = tskit.load(init_ts_path)
-        other_ts = si.initial_ts(problematic_sites=problematic)
+        other_ts = util.initial_ts(problematic_sites=problematic)
         other_ts.tables.assert_equals(init_ts.tables)
         match_db_path = tmp_path / "matches" / "test.matches.db"
         match_db = si.MatchDb(match_db_path)
