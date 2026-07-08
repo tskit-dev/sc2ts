@@ -25,7 +25,7 @@ import tsinfer
 import tskit
 import tszip
 
-from . import core, data_import, jit, stats, tree_ops
+from . import core, jit, stats, tree_ops
 from . import dataset as _dataset
 
 logger = logging.getLogger(__name__)
@@ -264,12 +264,13 @@ def mirror_ts_coordinates(ts):
     return tables.tree_sequence()
 
 
-def initial_ts(problematic_sites=None):
+def initial_ts(
+    *, reference_sequence, reference_id, reference_date, problematic_sites=None
+):
     if problematic_sites is None:
         problematic_sites = []
-    reference = data_import.get_reference_sequence()
-    L = core.REFERENCE_SEQUENCE_LENGTH
-    assert L == len(reference)
+    reference = reference_sequence
+    L = len(reference)
     problematic_sites = set(problematic_sites)
 
     logger.info(f"Masking out {len(problematic_sites)} sites")
@@ -281,7 +282,6 @@ def initial_ts(problematic_sites=None):
     base_schema = tskit.MetadataSchema.permissive_json().schema
     tables.reference_sequence.metadata_schema = tskit.MetadataSchema(base_schema)
     tables.reference_sequence.metadata = {
-        "genbank_id": core.REFERENCE_GENBANK,
         "notes": "X prepended to alignment to map from 1-based to 0-based coordinates",
     }
     tables.reference_sequence.data = reference
@@ -289,7 +289,7 @@ def initial_ts(problematic_sites=None):
     tables.metadata_schema = tskit.MetadataSchema(base_schema)
     tables.metadata = {
         "sc2ts": {
-            "date": core.REFERENCE_DATE,
+            "date": reference_date,
             "samples_strain": [],
             "daily_stats": {},
             "cumulative_stats": {
@@ -328,8 +328,8 @@ def initial_ts(problematic_sites=None):
         flags=core.NODE_IS_REFERENCE,
         time=0,
         metadata={
-            "strain": core.REFERENCE_STRAIN,
-            "date": core.REFERENCE_DATE,
+            "strain": reference_id,
+            "date": reference_date,
             "sc2ts": {"notes": "Reference sequence"},
         },
     )
@@ -806,12 +806,12 @@ def add_sample_to_tables(sample, tables, group_id=None, time=0):
     return tables.nodes.add_row(flags=sample.flags, metadata=metadata, time=time)
 
 
-def match_path_ts(group):
+def match_path_ts(group, sequence_length):
     """
     Given the specified SampleGroup return the tree sequence rooted at
     zero representing the data.
     """
-    tables = tskit.TableCollection(core.REFERENCE_SEQUENCE_LENGTH)
+    tables = tskit.TableCollection(sequence_length)
     tables.nodes.metadata_schema = tskit.MetadataSchema.permissive_json()
     tables.mutations.metadata_schema = tskit.MetadataSchema.permissive_json()
     site_id_map = {}
@@ -1039,7 +1039,7 @@ def add_matching_results(
                     f"{group.summary()}"
                 )
                 continue
-            flat_ts = match_path_ts(group)
+            flat_ts = match_path_ts(group, ts.sequence_length)
             if flat_ts.num_mutations == 0 or flat_ts.num_samples == 1:
                 poly_ts = flat_ts
             else:

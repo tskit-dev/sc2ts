@@ -446,6 +446,8 @@ class Dataset(collections.abc.Mapping):
             sample_id = self["sample_id"][:]
         Dataset.new(
             path,
+            sequence_length=int(self["contig_length"][0]),
+            contig_id=self["contig_id"][0],
             samples_chunk_size=samples_chunk_size,
             variants_chunk_size=variants_chunk_size,
         )
@@ -469,14 +471,21 @@ class Dataset(collections.abc.Mapping):
         self.copy(path, sample_id=sample_id[index], show_progress=show_progress)
 
     @staticmethod
-    def new(path, samples_chunk_size=None, variants_chunk_size=None):
+    def new(
+        path,
+        *,
+        sequence_length,
+        contig_id,
+        samples_chunk_size=None,
+        variants_chunk_size=None,
+    ):
         if samples_chunk_size is None:
             samples_chunk_size = 10_000
         if variants_chunk_size is None:
             variants_chunk_size = 100
 
         logger.info(f"Creating new dataset at {path}")
-        L = core.REFERENCE_SEQUENCE_LENGTH - 1
+        L = sequence_length - 1
         N = 0  # Samples must be added
         store = zarr.DirectoryStore(path)
         root = zarr.open(store, mode="w")
@@ -508,7 +517,7 @@ class Dataset(collections.abc.Mapping):
             dtype="str",
             compressor=DEFAULT_ZARR_COMPRESSOR,
         )
-        z[0] = core.REFERENCE_STRAIN
+        z[0] = contig_id
         z.attrs["_ARRAY_DIMENSIONS"] = ["contigs"]
 
         z = root.empty(
@@ -633,9 +642,12 @@ class Dataset(collections.abc.Mapping):
             add_to_zip(zf, in_path, ".")
 
 
-def tmp_dataset(path, alignments, date="2020-01-01"):
+def tmp_dataset(path, alignments, date="2020-01-01", contig_id=None):
     # Minimal hacky thing for testing. Should refactor into something more useful.
-    Dataset.new(path)
+    if contig_id is None:
+        contig_id = core.REFERENCE_STRAIN
+    sequence_length = len(next(iter(alignments.values()))) + 1
+    Dataset.new(path, sequence_length=sequence_length, contig_id=contig_id)
     Dataset.append_alignments(path, alignments)
     df = pd.DataFrame({"strain": alignments.keys(), "date": [date] * len(alignments)})
     Dataset.add_metadata(path, df.set_index("strain"))

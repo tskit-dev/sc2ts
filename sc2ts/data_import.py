@@ -5,8 +5,6 @@ import pathlib
 import numpy as np
 import pyfaidx
 
-from . import core
-
 
 class FastaReader(collections.abc.Mapping):
     def __init__(self, path, add_zero_base=True):
@@ -31,19 +29,16 @@ class FastaReader(collections.abc.Mapping):
 
 data_path = pathlib.Path(__file__).parent / "data"
 
-__cached_reference = None
 
-
-def get_reference_sequence(as_array=False):
-    global __cached_reference
-    if __cached_reference is None:
-        reader = pyfaidx.Fasta(str(data_path / "reference.fasta"))
-        __cached_reference = reader[core.REFERENCE_GENBANK]
-    if as_array:
-        h = np.array(__cached_reference).astype(str)
-        return np.append(["X"], h)
-    else:
-        return "X" + str(__cached_reference)
+def read_fasta(path):
+    """
+    Read the first record of the FASTA at ``path``, returning
+    ``(record_id, sequence)`` with an "X" prepended so the genome uses 1-based
+    coordinates.
+    """
+    reader = pyfaidx.Fasta(str(path))
+    name = list(reader.keys())[0]
+    return name, "X" + str(reader[name])
 
 
 __cached_genes = None
@@ -88,18 +83,6 @@ def get_problematic_regions():
             np.arange(21602, 22472, dtype=np.int64),  # NTD domain in S
             np.arange(*orf8, dtype=np.int64),
         ]
-    )
-
-
-def get_flank_coordinates():
-    """
-    Return the coordinates at either end of the genome for masking out.
-    """
-    genes = get_gene_coordinates()
-    start = genes["ORF1ab"][0]
-    end = genes["ORF10"][1]
-    return np.concatenate(
-        (np.arange(1, start), np.arange(end, REFERENCE_SEQUENCE_LENGTH))
     )
 
 

@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 import tomli_w
 import tskit
+import util
 
 import sc2ts
 from sc2ts import cli
@@ -40,6 +41,138 @@ class TestImportAlignments:
             catch_exceptions=True,
         )
         assert result.exit_code == 1
+
+
+def write_custom_genome(tmp_path, length=60):
+    """
+    Write a small synthetic reference FASTA, a matching-length alignments FASTA
+    and a metadata TSV. Returns (reference_path, dataset_path, metadata_path).
+    """
+    rng = np.random.RandomState(42)
+    bases = np.array(list("ACGT"))
+    ref = "".join(rng.choice(bases, size=length))
+    ref_path = tmp_path / "ref.fasta"
+    ref_path.write_text(f">chr_test synthetic genome\n{ref}\n")
+
+    aln_path = tmp_path / "aln.fasta"
+    rows = []
+    for j in range(4):
+        # Each sample is the reference with a single mutation.
+        h = list(ref)
+        h[10 + j] = "A" if h[10 + j] != "A" else "C"
+        rows.append(f">s{j}\n{''.join(h)}\n")
+    aln_path.write_text("".join(rows))
+
+    meta_path = tmp_path / "meta.tsv"
+    meta_lines = ["Run\tdate"]
+    for j in range(4):
+        meta_lines.append(f"s{j}\t2020-01-0{j + 1}")
+    meta_path.write_text("\n".join(meta_lines) + "\n")
+    return ref_path, aln_path, meta_path
+
+
+class TestCustomReferenceGenome:
+    def build_dataset(self, tmp_path):
+        ref_path, aln_path, meta_path = write_custom_genome(tmp_path)
+        ds_path = tmp_path / "ds.zarr"
+        runner = ct.CliRunner()
+        result = runner.invoke(
+            cli.cli,
+            f"import-alignments {ds_path} {aln_path} -i "
+            f"--reference {ref_path} --no-progress",
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        result = runner.invoke(
+            cli.cli,
+            f"import-metadata {ds_path} {meta_path}",
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+        return ref_path, ds_path
+
+    def test_import_alignments_reference(self, tmp_path):
+        ref_path, ds_path = self.build_dataset(tmp_path)
+        ds = sc2ts.Dataset(ds_path, date_field="date")
+        assert ds["contig_id"][0] == "chr_test"
+        assert int(ds["contig_length"][0]) == 61
+        assert ds.num_samples == 4
+
+    def test_infer_custom_reference(self, tmp_path):
+        ref_path, ds_path = self.build_dataset(tmp_path)
+        config = {
+            "dataset": str(ds_path),
+            "date_field": "date",
+            "run_id": "test",
+            "results_dir": str(tmp_path / "results"),
+            "log_dir": str(tmp_path / "logs"),
+            "matches_dir": str(tmp_path / "matches"),
+            "reference_fasta": str(ref_path),
+            "reference_date": "2019-01-01",
+            "extend_parameters": {"min_group_size": 1, "num_threads": 0},
+        }
+        config_file = tmp_path / "config.toml"
+        with open(config_file, "w") as f:
+            f.write(tomli_w.dumps(config))
+
+        runner = ct.CliRunner()
+        # Run the full pipeline over the sample dates so the matching machinery
+        # (match_path_ts) exercises the custom genome length end-to-end.
+        result = runner.invoke(
+            cli.cli,
+            f"infer {config_file} --stop 2020-02-01",
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0
+
+        results_dir = tmp_path / "results" / "test"
+        init_ts = tskit.load(results_dir / "test_init.ts")
+        reference_id, reference_sequence = cli.get_reference(str(ref_path))
+        expected = si.initial_ts(
+            reference_sequence=reference_sequence,
+            reference_id=reference_id,
+            reference_date="2019-01-01",
+        )
+        expected.tables.assert_equals(init_ts.tables)
+        # The initial ts is sized to the custom genome and labelled from it.
+        assert init_ts.sequence_length == 61
+        assert init_ts.node(1).metadata["strain"] == "chr_test"
+
+        # A dated tree sequence is produced for each sample date, at the custom
+        # genome length.
+        for day in range(1, 5):
+            dated = tskit.load(results_dir / f"test_2020-01-0{day}.ts")
+            assert dated.sequence_length == 61
+            assert dated.num_sites == 60
+
+    def test_infer_reference_length_mismatch(self, tmp_path):
+        # Build a length-60 custom dataset, then point the config at a reference
+        # of a different length -> the guard rejects the inconsistency.
+        _, ds_path = self.build_dataset(tmp_path)
+        ref_path = tmp_path / "wrong_ref.fasta"
+        ref_path.write_text(">chr_other\n" + "ACGT" * 10 + "\n")
+        config = {
+            "dataset": str(ds_path),
+            "date_field": "date",
+            "run_id": "test",
+            "results_dir": str(tmp_path / "results"),
+            "log_dir": str(tmp_path / "logs"),
+            "matches_dir": str(tmp_path / "matches"),
+            "reference_fasta": str(ref_path),
+            "reference_date": "2019-01-01",
+            "extend_parameters": {},
+        }
+        config_file = tmp_path / "config.toml"
+        with open(config_file, "w") as f:
+            f.write(tomli_w.dumps(config))
+
+        runner = ct.CliRunner()
+        with pytest.raises(ValueError, match="does not match the dataset"):
+            runner.invoke(
+                cli.cli,
+                f"infer {config_file} --stop 2020-01-01 -f",
+                catch_exceptions=False,
+            )
 
 
 class TestImportMetadata:
@@ -201,7 +334,7 @@ class TestInfer:
         assert result.exit_code == 0
         init_ts_path = tmp_path / "results" / "test" / "test_init.ts"
         init_ts = tskit.load(init_ts_path)
-        other_ts = si.initial_ts()
+        other_ts = util.initial_ts()
         other_ts.tables.assert_equals(init_ts.tables)
         match_db_path = tmp_path / "matches" / "test.matches.db"
         match_db = si.MatchDb(match_db_path)
@@ -219,7 +352,7 @@ class TestInfer:
         assert result.exit_code == 0
         init_ts_path = tmp_path / "results" / "test" / "test_init.ts"
         init_ts = tskit.load(init_ts_path)
-        other_ts = si.initial_ts(problematic_sites=problematic)
+        other_ts = util.initial_ts(problematic_sites=problematic)
         other_ts.tables.assert_equals(init_ts.tables)
         match_db_path = tmp_path / "matches" / "test.matches.db"
         match_db = si.MatchDb(match_db_path)

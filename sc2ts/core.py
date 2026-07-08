@@ -14,7 +14,6 @@ TIME_UNITS = "days"
 
 REFERENCE_STRAIN = "Wuhan/Hu-1/2019"
 REFERENCE_DATE = "2019-12-26"
-REFERENCE_GENBANK = "MN908947"
 REFERENCE_SEQUENCE_LENGTH = 29904
 
 # We omit N here as it's mapped to -1. Make "-" the 5th allele

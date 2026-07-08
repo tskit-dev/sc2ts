@@ -22,6 +22,16 @@ def assert_datasets_equal(ds1, ds2):
     xt.assert_equal(sg_ds1, sg_ds2)
 
 
+def new_reference_dataset(path, **kwargs):
+    # Create a dataset sized/labelled for the built-in SARS-CoV-2 reference.
+    return sc2ts.Dataset.new(
+        path,
+        sequence_length=sc2ts.REFERENCE_SEQUENCE_LENGTH,
+        contig_id=sc2ts.REFERENCE_STRAIN,
+        **kwargs,
+    )
+
+
 def test_massaged_viridian_metadata(fx_raw_viridian_metadata_df):
     df = fx_raw_viridian_metadata_df
     assert df["In_Viridian_tree"].dtype == bool
@@ -40,10 +50,25 @@ def test_massaged_viridian_metadata(fx_raw_viridian_metadata_df):
     assert np.sum(df["Genbank_N"]) > 0
 
 
+class TestReadFasta:
+    def test_builtin_default(self):
+        name, ref = data_import.read_fasta(data_import.data_path / "reference.fasta")
+        assert name == "MN908947"
+        assert ref[0] == "X"
+
+    def test_custom_fasta(self, tmp_path):
+        seq = "ACGTACGTACGT"
+        fasta = tmp_path / "ref.fasta"
+        fasta.write_text(f">chr_test some description\n{seq}\n")
+        name, ref = data_import.read_fasta(str(fasta))
+        assert name == "chr_test"
+        assert ref == "X" + seq
+
+
 class TestCreateDataset:
     def test_new(self, tmp_path):
         path = tmp_path / "dataset.vcz"
-        sc2ts.Dataset.new(path)
+        new_reference_dataset(path)
         sg_ds = load_dataset(path)
         assert dict(sg_ds.sizes) == {
             "variants": 29903,
@@ -53,6 +78,29 @@ class TestCreateDataset:
             "alleles": 16,
         }
         # TODO check various properties of the dataset
+
+    def test_new_custom_genome(self, tmp_path):
+        path = tmp_path / "dataset.vcz"
+        seq = "ACGTACGTACGTAACCGGTT"
+        sc2ts.Dataset.new(path, sequence_length=len(seq) + 1, contig_id="chr_test")
+        sg_ds = load_dataset(path)
+        assert dict(sg_ds.sizes) == {
+            "variants": len(seq),
+            "samples": 0,
+            "ploidy": 1,
+            "contigs": 1,
+            "alleles": 16,
+        }
+        assert sg_ds["contig_id"].values[0] == "chr_test"
+        assert sg_ds["contig_length"].values[0] == len(seq) + 1
+
+        # Length-M encoded alignments round-trip through append.
+        h = jit.encode_alleles(np.array(list(seq)))
+        sc2ts.Dataset.append_alignments(path, {"s0": h})
+        sg_ds = load_dataset(path)
+        assert sg_ds.sizes["samples"] == 1
+        H = sg_ds["call_genotype"].values.squeeze(2).T
+        nt.assert_array_equal(h, H[0])
 
     @pytest.mark.parametrize(
         ["num_samples", "chunk_size"],
@@ -67,7 +115,7 @@ class TestCreateDataset:
         self, tmp_path, fx_encoded_alignments, num_samples, chunk_size
     ):
         path = tmp_path / "dataset.vcz"
-        sc2ts.Dataset.new(path, samples_chunk_size=chunk_size)
+        new_reference_dataset(path, samples_chunk_size=chunk_size)
         alignments = {
             k: fx_encoded_alignments[k]
             for k in itertools.islice(fx_encoded_alignments.keys(), num_samples)
@@ -91,7 +139,7 @@ class TestCreateDataset:
     @pytest.mark.parametrize("num_samples", [1, 10, 20])
     def test_append_same_alignments(self, tmp_path, fx_encoded_alignments, num_samples):
         path = tmp_path / "dataset.vcz"
-        sc2ts.Dataset.new(path)
+        new_reference_dataset(path)
         sc2ts.Dataset.append_alignments(path, fx_encoded_alignments)
         alignments = {
             k: fx_encoded_alignments[k]
@@ -114,7 +162,7 @@ class TestCreateDataset:
         self, tmp_path, fx_encoded_alignments, num_samples, chunk_size
     ):
         path = tmp_path / "dataset.vcz"
-        sc2ts.Dataset.new(path, samples_chunk_size=chunk_size)
+        new_reference_dataset(path, samples_chunk_size=chunk_size)
         alignments = {
             k: fx_encoded_alignments[k]
             for k in itertools.islice(fx_encoded_alignments.keys(), num_samples)
@@ -139,7 +187,7 @@ class TestCreateDataset:
     def test_add_metadata(self, tmp_path, fx_encoded_alignments, fx_metadata_df):
 
         path = tmp_path / "dataset.vcz"
-        ds = sc2ts.Dataset.new(path)
+        new_reference_dataset(path)
         sc2ts.Dataset.append_alignments(path, fx_encoded_alignments)
         field_descriptions = {col: col.upper() for col in fx_metadata_df}
         sc2ts.Dataset.add_metadata(
@@ -163,7 +211,7 @@ class TestCreateDataset:
     def test_create_zip(self, tmp_path, fx_encoded_alignments, fx_metadata_df):
 
         path = tmp_path / "dataset.vcz"
-        sc2ts.Dataset.new(path)
+        new_reference_dataset(path)
         sc2ts.Dataset.append_alignments(path, fx_encoded_alignments)
         sc2ts.Dataset.add_metadata(path, fx_metadata_df)
         zip_path = tmp_path / "dataset.vcz.zip"
@@ -385,7 +433,7 @@ class TestDatasetMethods:
 class TestMafftAlignments:
     def test_import(self, tmp_path, fx_encoded_alignments_mafft):
         path = tmp_path / "dataset.vcz"
-        sc2ts.Dataset.new(path)
+        new_reference_dataset(path)
         sc2ts.Dataset.append_alignments(path, fx_encoded_alignments_mafft)
         ds = sc2ts.Dataset(path)
         assert len(ds.alignment) == 19
@@ -439,7 +487,7 @@ class TestDatasetAlignments:
         cache_size,
     ):
         path = tmp_path / "dataset.vcz"
-        sc2ts.Dataset.new(path, samples_chunk_size=chunk_size)
+        new_reference_dataset(path, samples_chunk_size=chunk_size)
         sc2ts.Dataset.append_alignments(path, fx_encoded_alignments)
         sc2ts.Dataset.add_metadata(path, fx_metadata_df)
         ds = sc2ts.Dataset(path, chunk_cache_size=cache_size)
@@ -486,7 +534,7 @@ class TestDatasetMetadata:
         cache_size,
     ):
         path = tmp_path / "dataset.vcz"
-        sc2ts.Dataset.new(path, samples_chunk_size=chunk_size)
+        new_reference_dataset(path, samples_chunk_size=chunk_size)
         sc2ts.Dataset.append_alignments(path, fx_encoded_alignments)
         sc2ts.Dataset.add_metadata(path, fx_metadata_df)
         ds = sc2ts.Dataset(path, chunk_cache_size=cache_size, date_field="date")

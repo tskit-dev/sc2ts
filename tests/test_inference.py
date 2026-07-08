@@ -8,6 +8,7 @@ import numpy.testing as nt
 import pandas as pd
 import pytest
 import tskit
+import util
 
 import sc2ts
 from sc2ts import debug, jit, tree_ops, validation
@@ -144,12 +145,12 @@ class TestSolveNumMismatches:
 
 class TestInitialTs:
     def test_reference_sequence(self):
-        ts = si.initial_ts()
-        assert ts.reference_sequence.metadata["genbank_id"] == "MN908947"
-        assert ts.reference_sequence.data == sc2ts.data_import.get_reference_sequence()
+        ts = util.initial_ts()
+        assert "genbank_id" not in ts.reference_sequence.metadata
+        assert ts.reference_sequence.data == util.reference_sequence()
 
     def test_reference_node(self):
-        ts = si.initial_ts()
+        ts = util.initial_ts()
         assert ts.num_samples == 0
         node = ts.node(1)
         assert node.time == 0
@@ -159,6 +160,117 @@ class TestInitialTs:
             "sc2ts": {"notes": "Reference sequence"},
         }
         assert node.flags == sc2ts.NODE_IS_REFERENCE
+
+    def test_custom_reference(self):
+        seq = "ACGTACGTACGTAACCGGTT"
+        ts = si.initial_ts(
+            reference_sequence="X" + seq,
+            reference_id="chr_test",
+            reference_date="2020-05-01",
+        )
+        # sequence_length and number of sites are driven by the reference length
+        # (with the "X" prepended at position 0 for 1-based coordinates).
+        assert ts.sequence_length == len(seq) + 1
+        assert ts.num_sites == len(seq)
+        assert ts.reference_sequence.data == "X" + seq
+        # Ancestral states match the reference (1-based coordinates).
+        for site in ts.sites():
+            assert site.ancestral_state == seq[int(site.position) - 1]
+        # Identity comes from the supplied values, not SARS-CoV-2.
+        assert "genbank_id" not in ts.reference_sequence.metadata
+        node = ts.node(1)
+        assert node.metadata["strain"] == "chr_test"
+        assert node.metadata["date"] == "2020-05-01"
+
+
+class TestTinyGenomeInference:
+    """
+    Run the full inference pipeline over a tiny synthetic genome with a handful
+    of samples, and check the resulting tree and mutations explicitly.
+    """
+
+    # A 30bp reference and three samples, each the reference with a single known
+    # point mutation at a known (0-based) position.
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT"
+    plants = {
+        "s0": (4, "T"),  # ref C -> T
+        "s1": (12, "A"),  # ref G -> A
+        "s2": (21, "A"),  # ref C -> A
+    }
+
+    def build(self, tmp_path):
+        ref = self.reference
+        alignments = {}
+        for name, (pos, base) in self.plants.items():
+            h = list(ref)
+            assert h[pos] != base
+            h[pos] = base
+            alignments[name] = jit.encode_alleles(np.array(h))
+        ds = sc2ts.dataset.tmp_dataset(
+            tmp_path / "ds.zarr",
+            alignments,
+            date="2020-01-01",
+            contig_id="chr_test",
+        )
+        base_ts = si.initial_ts(
+            reference_sequence="X" + ref,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+        base_path = tmp_path / "base.ts"
+        base_ts.dump(base_path)
+        si.MatchDb.initialise(tmp_path / "match.db")
+        ts = si.extend(
+            dataset=ds.path,
+            base_ts=str(base_path),
+            date="2020-01-01",
+            match_db=str(tmp_path / "match.db"),
+            min_group_size=1,
+            num_threads=0,
+        )
+        return ts
+
+    def test_dimensions(self, tmp_path):
+        ts = self.build(tmp_path)
+        assert ts.sequence_length == len(self.reference) + 1
+        assert ts.num_sites == len(self.reference)
+        assert ts.num_samples == len(self.plants)
+        assert ts.num_trees == 1
+        # Ancestral states are the reference bases (1-based coordinates).
+        for site in ts.sites():
+            assert site.ancestral_state == self.reference[int(site.position) - 1]
+
+    def test_mutations(self, tmp_path):
+        ts = self.build(tmp_path)
+        # Exactly the planted mutations appear, at the expected positions and
+        # with the expected derived states.
+        observed = sorted(
+            (int(ts.sites_position[m.site]), m.derived_state) for m in ts.mutations()
+        )
+        expected = sorted((pos + 1, base) for (pos, base) in self.plants.values())
+        assert observed == expected
+
+        # Each mutation is carried by exactly the sample that introduced it.
+        strain_to_node = {ts.node(u).metadata["strain"]: u for u in ts.samples()}
+        for name, (pos, base) in self.plants.items():
+            node = strain_to_node[name]
+            mut_ids = np.where(ts.mutations_node == node)[0]
+            assert len(mut_ids) == 1
+            mut = ts.mutation(mut_ids[0])
+            assert mut.derived_state == base
+            assert int(ts.sites_position[mut.site]) == pos + 1
+            assert mut.parent == tskit.NULL
+
+    def test_topology(self, tmp_path):
+        ts = self.build(tmp_path)
+        tree = ts.first()
+        (reference_node,) = [u for u in ts.nodes() if u.flags & sc2ts.NODE_IS_REFERENCE]
+        # Every sample descends from the reference node.
+        for u in ts.samples():
+            v = u
+            while v != tskit.NULL and v != reference_node.id:
+                v = tree.parent(v)
+            assert v == reference_node.id
 
 
 class TestMatchTsinfer:
@@ -175,11 +287,11 @@ class TestMatchTsinfer:
 
     @pytest.mark.parametrize("mirror", [False, True])
     def test_match_reference(self, mirror):
-        ts = si.initial_ts()
+        ts = util.initial_ts()
         tables = ts.dump_tables()
         tables.sites.truncate(20)
         ts = tables.tree_sequence()
-        alignment = sc2ts.data_import.get_reference_sequence(as_array=True)
+        alignment = util.reference_array()
         alignment[0] = "A"
         a = jit.encode_alleles(alignment)
         h = a[ts.sites_position.astype(int)]
@@ -192,11 +304,11 @@ class TestMatchTsinfer:
     @pytest.mark.parametrize("mirror", [False, True])
     @pytest.mark.parametrize("site_id", [0, 10, 19])
     def test_match_reference_one_mutation(self, mirror, site_id):
-        ts = si.initial_ts()
+        ts = util.initial_ts()
         tables = ts.dump_tables()
         tables.sites.truncate(20)
         ts = tables.tree_sequence()
-        alignment = sc2ts.data_import.get_reference_sequence(as_array=True)
+        alignment = util.reference_array()
         alignment[0] = "A"
         a = jit.encode_alleles(alignment)
         h = a[ts.sites_position.astype(int)]
@@ -218,11 +330,11 @@ class TestMatchTsinfer:
     @pytest.mark.parametrize("mirror", [False, True])
     @pytest.mark.parametrize("allele", range(5))
     def test_match_reference_all_same(self, mirror, allele):
-        ts = si.initial_ts()
+        ts = util.initial_ts()
         tables = ts.dump_tables()
         tables.sites.truncate(20)
         ts = tables.tree_sequence()
-        alignment = sc2ts.data_import.get_reference_sequence(as_array=True)
+        alignment = util.reference_array()
         alignment[0] = "A"
         a = jit.encode_alleles(alignment)
         ref = a[ts.sites_position.astype(int)]

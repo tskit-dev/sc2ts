@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import tskit
+import util
 
 import sc2ts
 from sc2ts import data_import, jit
@@ -103,7 +104,12 @@ def fx_dataset(tmp_path, fx_data_cache, fx_alignments_fasta, fx_metadata_df):
         fs_path = tmp_path / "dataset.vcz"
         # Use an awkward chunk size here to make sure we're hitting across
         # chunk stuff by default
-        sc2ts.Dataset.new(fs_path, samples_chunk_size=7)
+        sc2ts.Dataset.new(
+            fs_path,
+            sequence_length=sc2ts.REFERENCE_SEQUENCE_LENGTH,
+            contig_id=sc2ts.REFERENCE_STRAIN,
+            samples_chunk_size=7,
+        )
         sc2ts.Dataset.append_alignments(fs_path, encoded_alignments(fx_alignments_fasta))
         sc2ts.Dataset.add_metadata(fs_path, fx_metadata_df)
         sc2ts.Dataset.create_zip(fs_path, cache_path)
@@ -148,7 +154,7 @@ def fx_ts_map(tmp_path, fx_data_cache, fx_dataset, fx_match_db):
     if not cache_path.exists():
         # These sites are masked out in all alignments in the initial data
         # anyway; https://github.com/tskit-dev/sc2ts/issues/282
-        last_ts = si.initial_ts([56, 57, 58, 59, 60])
+        last_ts = util.initial_ts([56, 57, 58, 59, 60])
         cache_path = fx_data_cache / "initial.ts"
         last_ts.dump(cache_path)
         for date in dates:
