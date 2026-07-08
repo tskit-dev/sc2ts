@@ -5,8 +5,6 @@ import pathlib
 import numpy as np
 import pyfaidx
 
-from . import core
-
 
 class FastaReader(collections.abc.Mapping):
     def __init__(self, path, add_zero_base=True):
@@ -85,18 +83,6 @@ def get_problematic_regions():
             np.arange(21602, 22472, dtype=np.int64),  # NTD domain in S
             np.arange(*orf8, dtype=np.int64),
         ]
-    )
-
-
-def get_flank_coordinates():
-    """
-    Return the coordinates at either end of the genome for masking out.
-    """
-    genes = get_gene_coordinates()
-    start = genes["ORF1ab"][0]
-    end = genes["ORF10"][1]
-    return np.concatenate(
-        (np.arange(1, start), np.arange(end, core.REFERENCE_SEQUENCE_LENGTH))
     )
 
 
