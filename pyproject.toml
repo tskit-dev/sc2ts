@@ -17,6 +17,7 @@ dependencies = [
   # as imported by the CLI
   "tomli",
   "humanize",
+  "zarr<3", # No point in supporting zarr3 until tsinfer updated
 ]
 dynamic = ["version"]
 
@@ -38,7 +39,6 @@ inference = [
   "tsinfer>=0.5,<1",
   "pyfaidx",
   "numba",
-  "zarr<3", # No point in supporting zarr3 until tsinfer updated
 ]
 debug = [
   "matplotlib",
