@@ -2117,6 +2117,11 @@ def rematch_recombinant_lbs(ts, node_id, num_mismatches):
     recurrent_site_pos = {
         u: len(ndinfo.positions & hmm_positions) for u, ndinfo in node_mutations.items()
     }
+    if len(recurrent_site_pos) == 0:
+        # No recurrent or reversion sites, so LBS has no obvious target branches
+        # that could be split, and we don't bother doing any more.
+        return result
+
     target_nodes = sorted(recurrent_site_pos, key=recurrent_site_pos.get, reverse=True)
     if recurrent_site_pos[target_nodes[0]] == recurrent_site_pos[target_nodes[1]]:
         logger.warning(
@@ -2124,10 +2129,6 @@ def rematch_recombinant_lbs(ts, node_id, num_mismatches):
             "one arbitrarily "
             f" (num deletable muts = {recurrent_site_pos[target_nodes[0]]})"
         )
-
-    base_node = target_nodes[0]
-    side = node_mutations[base_node].side
-    assert len(node_mutations[base_node]) > 0
 
     States = collections.namedtuple(
         "States", "inherited, derived", defaults=(None, None)
@@ -2140,18 +2141,36 @@ def rematch_recombinant_lbs(ts, node_id, num_mismatches):
         for m in original_match.mutations
     }
 
-    to_move = []
-    for mut_id in np.where(base_ts.mutations_node == base_node)[0]:
-        site = base_ts.mutations_site[mut_id]
-        pos = base_ts.sites_position[site]
-        derived_state = base_ts.mutation(mut_id).derived_state
+    tree = base_ts.at(breakpt)
+    # Look for nodes that can be split, starting from the node with the most
+    # recurrent/reversion muts, and ascending through its parents until
+    # we find a splittable node (i.e. with some but not all mutations that can
+    # be moved to above a new node).
+    base_nodes = [target_nodes[0]] + list(tree.ancestors(target_nodes[0]))
+    for base_node in base_nodes:
+        if base_node not in node_mutations or len(node_mutations[base_node]) == 0:
+            continue
+        side = node_mutations[base_node].side
+        to_move = []
+        mutations = np.where(base_ts.mutations_node == base_node)[0]
+        for mut_id in mutations:
+            site = base_ts.mutations_site[mut_id]
+            pos = base_ts.sites_position[site]
+            derived_state = base_ts.mutation(mut_id).derived_state
 
-        if side == "rgt" and pos < breakpt or side == "lft" and pos >= breakpt:
-            if hmm_mutations.get(pos, States()).derived == derived_state:
-                to_move.append(mut_id)
-        else:
-            if hmm_mutations.get(pos, States()).inherited != derived_state:
-                to_move.append(mut_id)
+            if side == "rgt" and pos < breakpt or side == "lft" and pos >= breakpt:
+                if hmm_mutations.get(pos, States()).derived == derived_state:
+                    to_move.append(mut_id)
+            else:
+                if hmm_mutations.get(pos, States()).inherited != derived_state:
+                    to_move.append(mut_id)
+
+        if len(to_move) > 0 and len(to_move) < len(mutations):
+            break
+
+    if len(to_move) == 0 or len(to_move) == len(mutations):
+        # No splitting possible, so we don't bother doing any more.
+        return result
 
     new_ts = tree_ops.split_branch(base_ts, base_node, to_move)
     new_node = new_ts.num_nodes - 1
