@@ -55,8 +55,12 @@ deletions_as_missing=true
 
 # The minimum number of samples in a retro group
 min_group_size=10
+# The minimum number of distinct dates the samples were collected on
+min_different_dates=3
 # The minimum number of mutations shared by all samples
 min_root_mutations=2
+# The maximum number of distinct pango lineages in the group
+max_pango_lineages=10
 # The maxmimum number of recurrent mutations in the group tree
 max_recurrent_mutations=2
 # The maxmimum number of mutations per sample, overall
