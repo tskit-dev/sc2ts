@@ -842,12 +842,16 @@ class ArgInfo:
         for group_id, nodes in self.sample_group_nodes.items():
             samples = []
             full_hashes = []
+            num_parents = []
             for u in nodes:
                 node = self.ts.node(u)
                 if node.is_sample():
                     samples.append(u)
-                    full_hashes.append(node.metadata["sc2ts"]["group_id"])
+                    md = self.nodes_metadata[u]["sc2ts"]
+                    num_parents.append(len(md["hmm_match"]["path"]))
+                    full_hashes.append(md["group_id"])
             assert len(set(full_hashes)) == 1
+            assert len(set(num_parents)) == 1
             assert full_hashes[0].startswith(group_id)
             data.append(
                 {
@@ -856,6 +860,7 @@ class ArgInfo:
                     "samples": len(samples),
                     "mutations": len(self.sample_group_mutations[group_id]),
                     "is_retro": group_id in self.retro_sample_groups,
+                    "num_parents": num_parents.pop(),
                 }
             )
         return pd.DataFrame(data).set_index("group_id")
