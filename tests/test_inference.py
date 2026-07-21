@@ -805,6 +805,52 @@ class TestRealData:
             "date_added": "2020-02-15",
         }
 
+    def test_2020_02_14_allow_pango_lineages(
+        self, tmp_path, fx_ts_map, fx_dataset, fx_match_db
+    ):
+        date = "2020-02-14"
+        assert len(list(fx_dataset.metadata.samples_for_date(date))) == 0
+        ts = run_extend(
+            dataset=fx_dataset,
+            base_ts=fx_ts_map["2020-02-13"],
+            date="2020-02-15",
+            match_db=fx_match_db,
+            min_root_mutations=0,
+            min_group_size=1,
+            min_different_dates=1,
+            # The largest group here has 2 lineages, so this lets everything in
+            max_pango_lineages=2,
+        )
+        retro_groups = ts.metadata["sc2ts"]["retro_groups"]
+        assert len(retro_groups) == 6
+
+    def test_2020_02_14_skip_pango_lineages(
+        self,
+        tmp_path,
+        fx_ts_map,
+        fx_dataset,
+        fx_match_db,
+        caplog,
+    ):
+        date = "2020-02-14"
+        assert len(list(fx_dataset.metadata.samples_for_date(date))) == 0
+        with caplog.at_level("DEBUG", logger="sc2ts.inference"):
+            ts = run_extend(
+                dataset=fx_dataset,
+                base_ts=fx_ts_map["2020-02-13"],
+                date="2020-02-15",
+                match_db=fx_match_db,
+                min_root_mutations=0,
+                min_group_size=1,
+                min_different_dates=1,
+                # Excludes the one group spanning the B and B.4 lineages
+                max_pango_lineages=1,
+            )
+            retro_groups = ts.metadata["sc2ts"]["retro_groups"]
+            assert len(retro_groups) == 5
+            assert all(len(set(g["pango_lineages"])) == 1 for g in retro_groups)
+            assert "Skipping num_pango_lineages=2 exceeds threshold" in caplog.text
+
     def test_2020_02_14_skip_recurrent(
         self,
         tmp_path,

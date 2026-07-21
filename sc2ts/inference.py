@@ -513,6 +513,7 @@ def extend(
     min_different_dates=None,
     max_mutations_per_sample=None,
     max_recurrent_mutations=None,
+    max_pango_lineages=None,
     deletions_as_missing=None,
     max_daily_samples=None,
     show_progress=False,
@@ -535,6 +536,8 @@ def extend(
         max_mutations_per_sample = 100
     if max_recurrent_mutations is None:
         max_recurrent_mutations = 100
+    if max_pango_lineages is None:
+        max_pango_lineages = 10
     if min_different_dates is None:
         min_different_dates = 3
     if retrospective_window is None:
@@ -572,6 +575,7 @@ def extend(
             min_different_dates=min_different_dates,
             max_mutations_per_sample=max_mutations_per_sample,
             max_recurrent_mutations=max_recurrent_mutations,
+            max_pango_lineages=max_pango_lineages,
             deletions_as_missing=deletions_as_missing,
             max_daily_samples=max_daily_samples,
             retrospective_window=retrospective_window,
@@ -601,6 +605,7 @@ def _extend(
     min_different_dates,
     max_mutations_per_sample,
     max_recurrent_mutations,
+    max_pango_lineages,
     deletions_as_missing,
     max_daily_samples,
     show_progress,
@@ -724,6 +729,7 @@ def _extend(
         min_root_mutations=min_root_mutations,
         max_mutations_per_sample=max_mutations_per_sample,
         max_recurrent_mutations=max_recurrent_mutations,
+        max_pango_lineages=max_pango_lineages,
         show_progress=show_progress,
         phase="retro",
     )
@@ -985,6 +991,7 @@ def add_matching_results(
     min_root_mutations=0,
     max_mutations_per_sample=np.inf,
     max_recurrent_mutations=np.inf,
+    max_pango_lineages=np.inf,
     show_progress=False,
     phase=None,
 ):
@@ -1037,6 +1044,13 @@ def add_matching_results(
                 logger.debug(
                     f"Skipping size={len(group)} dates={len(group.date_count)}: "
                     f"{group.summary()}"
+                )
+                continue
+            num_pango_lineages = len(group.pango_count)
+            if num_pango_lineages > max_pango_lineages:
+                logger.debug(
+                    f"Skipping num_pango_lineages={num_pango_lineages} exceeds "
+                    f"threshold: {group.summary()}"
                 )
                 continue
             flat_ts = match_path_ts(group, ts.sequence_length)
