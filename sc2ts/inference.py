@@ -932,15 +932,15 @@ class SampleGroup:
 
     @property
     def strains(self):
-        return [s.strain for s in self.samples]
+        return [str(s.strain) for s in self.samples]
 
     @property
     def date_count(self):
-        return collections.Counter([s.date for s in self.samples])
+        return collections.Counter([str(s.date) for s in self.samples])
 
     @property
     def pango_count(self):
-        return collections.Counter([s.pango for s in self.samples])
+        return collections.Counter([str(s.pango) for s in self.samples])
 
     def __len__(self):
         return len(self.samples)

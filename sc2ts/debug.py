@@ -458,6 +458,7 @@ class ArgInfo:
             total=ts.num_nodes,
             disable=not show_progress,
         )
+        group_id_prefix_map = {}
         for node in iterator:
             md = node.metadata
             self.nodes_metadata[node.id] = md
@@ -468,6 +469,14 @@ class ArgInfo:
             if group_id is not None:
                 # Shorten key for readability.
                 gid = group_id[: self.sample_group_id_prefix_len]
+                if gid not in group_id_prefix_map:
+                    group_id_prefix_map[gid] = group_id
+                if group_id != group_id_prefix_map[gid]:
+                    raise ValueError(
+                        "Sample group ID prefix collision. "
+                        "Increase sample_group_id_prefix_len "
+                        "(default=10)"
+                    )
                 self.sample_group_nodes[gid].append(node.id)
             if node.is_sample():
                 self.nodes_date[node.id] = md["date"]
