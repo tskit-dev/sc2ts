@@ -4,6 +4,11 @@
 
 In development
 
+- Seed samples listed in `include_samples` are now matched separately from the
+  daily samples, with recombination effectively disallowed. These samples are
+  usually far diverged from the current ARG, which previously led to spurious
+  recombinations.
+
 - Add basic support for non-SARS-CoV-2 genomes via an optional reference FASTA.
   Supply `--reference` to `import-alignments` and a `reference_fasta` key in the
   inference config; both default to the built-in SARS-CoV-2 reference, so

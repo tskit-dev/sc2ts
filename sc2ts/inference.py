@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 MISSING = -1
 DELETION = core.IUPAC_ALLELES.index("-")
 
+# Value of num_mismatches which effectively disallows recombination during
+# matching, since solve_num_mismatches drives rho down to its 1e-200 floor.
+NO_RECOMBINATION_NUM_MISMATCHES = 1000
+
 
 def get_provenance_dict(command, args, start_time):
     document = {
@@ -675,21 +679,37 @@ def _extend(
             logger.info(f"Subset from {len(samples)} to {max_daily_samples}")
             samples = rng.sample(samples, max_daily_samples)
 
-    samples = samples + unconditional_include_samples
-    samples.sort(key=lambda s: s.strain)
-
     ts = increment_time(date, base_ts)
-    if len(samples) > 0:
-        match_samples(
-            date,
-            samples,
-            base_ts=base_ts,
-            num_mismatches=num_mismatches,
-            deletions_as_missing=deletions_as_missing,
-            show_progress=show_progress,
-            num_threads=num_threads,
-            memory_limit=memory_limit,
-        )
+    if len(samples) + len(unconditional_include_samples) > 0:
+        if len(samples) > 0:
+            match_samples(
+                date,
+                samples,
+                base_ts=base_ts,
+                num_mismatches=num_mismatches,
+                deletions_as_missing=deletions_as_missing,
+                show_progress=show_progress,
+                num_threads=num_threads,
+                memory_limit=memory_limit,
+            )
+        if len(unconditional_include_samples) > 0:
+            # Seed samples are usually far diverged from the current ARG, and
+            # matching them with the standard num_mismatches gives spurious
+            # recombinations. Match them without recombination instead.
+            match_samples(
+                date,
+                unconditional_include_samples,
+                base_ts=base_ts,
+                num_mismatches=NO_RECOMBINATION_NUM_MISMATCHES,
+                deletions_as_missing=deletions_as_missing,
+                show_progress=show_progress,
+                num_threads=num_threads,
+                memory_limit=memory_limit,
+            )
+
+        samples = samples + unconditional_include_samples
+        samples.sort(key=lambda s: s.strain)
+
         characterise_match_mutations(base_ts, samples)
         characterise_recombinants(base_ts, samples)
 
@@ -2075,7 +2095,7 @@ def rematch_recombinant(base_ts, recomb_ts, node_id, num_mismatches):
     match_tsinfer(
         samples=[sample],
         ts=base_ts,
-        num_mismatches=1000,
+        num_mismatches=NO_RECOMBINATION_NUM_MISMATCHES,
         mismatch_threshold=2 * original_cost,
     )
     result.no_recomb_match = sample.hmm_match
