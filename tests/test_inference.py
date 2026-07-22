@@ -577,6 +577,13 @@ class TestRealData:
         u = ts.samples()[ts.metadata["sc2ts"]["samples_strain"].index("SRR11597115")]
         assert ts.nodes_flags[u] & tskit.NODE_IS_SAMPLE > 0
         assert ts.nodes_flags[u] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
+        # Seed samples are matched without recombination, so the node must
+        # have a single parent edge spanning the full sequence.
+        assert ts.nodes_flags[u] & sc2ts.NODE_IS_RECOMBINANT == 0
+        edges = [e for e in ts.edges() if e.child == u]
+        assert len(edges) == 1
+        assert edges[0].left == 0
+        assert edges[0].right == ts.sequence_length
 
     def test_2020_02_02_mutation_overlap(
         self,
