@@ -558,8 +558,7 @@ def extend(
     None the seed is matched in on ``match_date`` instead of its actual date;
     this may be *before* the actual date, in which case the seed node retains
     its actual date and is given a negative ("in the future") node time
-    relative to the match-day time-zero. This allows widely-diverged seeds
-    (e.g. Omicron BA.1/BA.2/BA.3) to be matched in on the same early day.
+    relative to the match-day time-zero.
     A ``match_date`` must be a date that is otherwise processed by the pipeline
     (i.e. has real samples in the dataset); otherwise the seed is never
     injected.
@@ -602,8 +601,13 @@ def extend(
     base_ts = tszip.load(base_ts)
     ds = _dataset.Dataset(dataset, date_field=date_field)
 
+    missing = sorted(
+        strain for strain, _ in include_samples if strain not in ds.metadata
+    )
+    if len(missing) > 0:
+        raise ValueError(f"Seed samples not in dataset: {missing}")
     for strain, match_date in include_samples:
-        if match_date is not None and strain in ds.metadata:
+        if match_date is not None:
             actual_date = ds.metadata[strain]["date"]
             if match_date > actual_date:
                 logger.warning(
@@ -688,13 +692,10 @@ def _extend(
         if override_dates.get(strain, date) == date
     }
     # Inject seeds whose override match date is today but which aren't
-    # naturally sampled today.
+    # naturally sampled today. Missing strains are rejected up-front in extend().
     for strain, match_date in override_dates.items():
         if match_date == date and strain not in metadata_matches:
-            if strain in dataset.metadata:
-                metadata_matches[strain] = dataset.metadata[strain]
-            else:
-                logger.warning(f"Seed sample {strain} not in dataset; cannot include")
+            metadata_matches[strain] = dataset.metadata[strain]
 
     logger.info(f"Got {len(metadata_matches)} metadata matches")
 
@@ -713,10 +714,7 @@ def _extend(
     samples = []
     for s in preprocessed_samples:
         if s.haplotype is None:
-            if s.strain in include_strains:
-                logger.warning(f"No alignment stored for seed sample {s.strain}")
-            else:
-                logger.debug(f"No alignment stored for {s.strain}")
+            logger.debug(f"No alignment stored for {s.strain}")
             continue
         md = metadata_matches[s.strain]
         s.metadata = md

@@ -620,7 +620,6 @@ class TestRealData:
         "include_samples",
         (
             ["SRR11597115"],
-            ["SRR11597115", "NOSUCHSTRAIN"],
             # The tuple form with a None match date is equivalent to the
             # bare-string form.
             [("SRR11597115", None)],
@@ -683,6 +682,30 @@ class TestRealData:
         assert edges[0].left == 0
         assert edges[0].right == ts.sequence_length
         assert ts.nodes_time[edges[0].parent] > ts.nodes_time[u]
+
+    def test_seed_match_date_equals_actual_date(self, tmp_path, fx_ts_map, fx_dataset):
+        # An override match date equal to the sample's actual date behaves like
+        # an ordinary seed: the node is present-dated (time 0), not in the
+        # future. SRR11597115's actual date is 2020-02-02.
+        strain = "SRR11597115"
+        ts = run_extend(
+            dataset=fx_dataset,
+            base_ts=fx_ts_map["2020-02-01"],
+            date="2020-02-02",
+            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
+            include_samples=[(strain, "2020-02-02")],
+        )
+        assert strain in ts.metadata["sc2ts"]["samples_strain"]
+        u = ts.samples()[ts.metadata["sc2ts"]["samples_strain"].index(strain)]
+        assert ts.nodes_flags[u] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
+        # match date == actual date, so the node sits at time zero.
+        assert ts.nodes_time[u] == 0
+        # Still matched without recombination: a single full-span parent edge.
+        assert ts.nodes_flags[u] & sc2ts.NODE_IS_RECOMBINANT == 0
+        edges = [e for e in ts.edges() if e.child == u]
+        assert len(edges) == 1
+        assert edges[0].left == 0
+        assert edges[0].right == ts.sequence_length
 
     def test_seed_early_match_date_evolves_over_days(
         self, tmp_path, fx_ts_map, fx_dataset
@@ -748,17 +771,27 @@ class TestRealData:
         )
         assert strain not in ts.metadata["sc2ts"]["samples_strain"]
 
-    def test_seed_unknown_strain_with_override(self, tmp_path, fx_ts_map, fx_dataset):
-        # An unknown seed strain (even with an override date) is tolerated
-        # silently, as bare unknown strains already are.
-        ts = run_extend(
-            dataset=fx_dataset,
-            base_ts=fx_ts_map["2020-02-01"],
-            date="2020-02-02",
-            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=[("NOSUCHSTRAIN", "2020-02-02")],
-        )
-        assert "NOSUCHSTRAIN" not in ts.metadata["sc2ts"]["samples_strain"]
+    @pytest.mark.parametrize(
+        "include_samples",
+        (
+            ["SRR11597115", "NOSUCHSTRAIN"],
+            [("NOSUCHSTRAIN", "2020-02-02")],
+            [("NOSUCHSTRAIN", None)],
+        ),
+    )
+    def test_seed_missing_strain_raises(
+        self, tmp_path, fx_ts_map, fx_dataset, include_samples
+    ):
+        # A seed strain that isn't in the dataset is an error, whether it's a
+        # bare strain or carries an override match date.
+        with pytest.raises(ValueError, match="not in dataset"):
+            run_extend(
+                dataset=fx_dataset,
+                base_ts=fx_ts_map["2020-02-01"],
+                date="2020-02-02",
+                match_db=si.MatchDb.initialise(tmp_path / "match.db"),
+                include_samples=include_samples,
+            )
 
     def test_2020_02_02_mutation_overlap(
         self,

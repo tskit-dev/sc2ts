@@ -13,8 +13,6 @@ In development
   addition to bare strain IDs). A non-None `match_date` matches the seed in on
   that date instead of its actual date; it may be *before* the actual date, in
   which case the seed node retains its actual date via a negative node time.
-  This lets widely-diverged seeds (e.g. Omicron BA.1/BA.2/BA.3) be matched in
-  on the same early day.
 
 - Add basic support for non-SARS-CoV-2 genomes via an optional reference FASTA.
   Supply `--reference` to `import-alignments` and a `reference_fasta` key in the

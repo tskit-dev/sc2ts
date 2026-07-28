@@ -660,27 +660,35 @@ def drop_vestigial_root_edge(ts):
 def detach_future_nodes(ts):
     """
     Return a copy of ``ts`` in which every node with a negative ("in the
-    future") time is detached by removing all edges incident to it.
+    future") time is fully detached: all edges incident to it are removed, any
+    mutations over it are dropped, and its ``NODE_IS_SAMPLE`` flag is cleared.
 
     Such nodes are seed samples that were matched in on a date before their
     actual date, and so lie in the future relative to the current time-zero.
     Detaching them prevents other samples from copying from them during
-    matching. Node IDs are preserved so that any match paths referring to the
-    returned tree sequence remain valid against the original.
+    matching. Node IDs and times are preserved so that any match paths
+    referring to the returned tree sequence remain valid against the original.
     """
     future = ts.nodes_time < 0
     if not np.any(future):
         return ts
     tables = ts.dump_tables()
-    keep = ~(future[tables.edges.parent] | future[tables.edges.child])
-    num_detached = int(np.sum(future))
+    keep_edges = ~(future[tables.edges.parent] | future[tables.edges.child])
+    keep_mutations = ~future[tables.mutations.node]
     logger.debug(
-        f"Detaching {num_detached} future nodes "
-        f"({len(tables.edges) - int(np.sum(keep))} edges removed)"
+        f"Detaching {int(np.sum(future))} future nodes "
+        f"({len(tables.edges) - int(np.sum(keep_edges))} edges, "
+        f"{len(tables.mutations) - int(np.sum(keep_mutations))} mutations removed)"
     )
-    tables.edges.keep_rows(keep)
+    tables.edges.keep_rows(keep_edges)
+    tables.mutations.keep_rows(keep_mutations)
+    # A detached future node must not be treated as a sample to copy from.
+    flags = tables.nodes.flags
+    flags[future] &= ~np.uint32(tskit.NODE_IS_SAMPLE)
+    tables.nodes.flags = flags
     tables.sort()
     tables.build_index()
+    tables.compute_mutation_parents()
     return tables.tree_sequence()
 
 
