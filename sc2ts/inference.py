@@ -502,6 +502,27 @@ def preprocess(
     return samples
 
 
+def normalise_include_samples(include_samples):
+    """
+    Normalise the ``include_samples`` input to a canonical list of
+    ``(strain, match_date)`` tuples, where ``match_date`` is None if not
+    specified. Each input entry may be a bare strain string, or a
+    ``(strain, match_date)`` tuple/list of length 2. Any non-None match date
+    is validated as an ISO date string.
+    """
+    normalised = []
+    for entry in include_samples:
+        if isinstance(entry, str):
+            strain, match_date = entry, None
+        else:
+            strain, match_date = entry
+        if match_date is not None:
+            # Validate; raises ValueError on a malformed date.
+            parse_date(match_date)
+        normalised.append((strain, match_date))
+    return normalised
+
+
 def extend(
     *,
     dataset,
@@ -527,7 +548,22 @@ def extend(
     num_threads=0,
     memory_limit=0,
 ):
+    """
+    Extend the base tree sequence by one day, matching in the samples for the
+    given date.
 
+    ``include_samples`` is an optional list of "seed" samples that are matched
+    in unconditionally and without recombination. Each entry is either a bare
+    strain ID, or a ``(strain, match_date)`` tuple. When ``match_date`` is not
+    None the seed is matched in on ``match_date`` instead of its actual date;
+    this may be *before* the actual date, in which case the seed node retains
+    its actual date and is given a negative ("in the future") node time
+    relative to the match-day time-zero. This allows widely-diverged seeds
+    (e.g. Omicron BA.1/BA.2/BA.3) to be matched in on the same early day.
+    A ``match_date`` must be a date that is otherwise processed by the pipeline
+    (i.e. has real samples in the dataset); otherwise the seed is never
+    injected.
+    """
     if num_mismatches is None:
         num_mismatches = 3
     if hmm_cost_threshold is None:
@@ -552,6 +588,7 @@ def extend(
         deletions_as_missing = False
     if include_samples is None:
         include_samples = []
+    include_samples = normalise_include_samples(include_samples)
     base_ts = str(base_ts)
     dataset = str(dataset)
     match_db = str(match_db)
@@ -564,6 +601,15 @@ def extend(
     start_time = time.time()  # wall time
     base_ts = tszip.load(base_ts)
     ds = _dataset.Dataset(dataset, date_field=date_field)
+
+    for strain, match_date in include_samples:
+        if match_date is not None and strain in ds.metadata:
+            actual_date = ds.metadata[strain]["date"]
+            if match_date > actual_date:
+                logger.warning(
+                    f"Seed sample {strain} match date {match_date} is after its "
+                    f"actual date {actual_date}; this is unusual for a seed sample"
+                )
 
     with MatchDb(match_db) as matches:
         tables = _extend(
@@ -625,10 +671,30 @@ def _extend(
         f"mutations={base_ts.num_mutations};date={previous_date}"
     )
 
+    include_strains = {strain for strain, _ in include_samples}
+    # Seeds with an explicit match date are matched in on that date instead of
+    # their actual date, so we override which day they're processed on.
+    override_dates = {
+        strain: match_date
+        for strain, match_date in include_samples
+        if match_date is not None
+    }
+
     metadata_matches = {
         strain: dataset.metadata[strain]
         for strain in dataset.metadata.samples_for_date(date)
+        # Exclude a seed with an override match date from its actual date; it
+        # is processed only on the override date.
+        if override_dates.get(strain, date) == date
     }
+    # Inject seeds whose override match date is today but which aren't
+    # naturally sampled today.
+    for strain, match_date in override_dates.items():
+        if match_date == date and strain not in metadata_matches:
+            if strain in dataset.metadata:
+                metadata_matches[strain] = dataset.metadata[strain]
+            else:
+                logger.warning(f"Seed sample {strain} not in dataset; cannot include")
 
     logger.info(f"Got {len(metadata_matches)} metadata matches")
 
@@ -643,12 +709,14 @@ def _extend(
     pango_lineage_key = "Viridian_pangolin"
     scorpio_key = "Viridian_scorpio"
 
-    include_strains = set(include_samples)
     unconditional_include_samples = []
     samples = []
     for s in preprocessed_samples:
         if s.haplotype is None:
-            logger.debug(f"No alignment stored for {s.strain}")
+            if s.strain in include_strains:
+                logger.warning(f"No alignment stored for seed sample {s.strain}")
+            else:
+                logger.debug(f"No alignment stored for {s.strain}")
             continue
         md = metadata_matches[s.strain]
         s.metadata = md
@@ -1455,6 +1523,9 @@ def match_tsinfer(
     num_alleles = 4 if deletions_as_missing else 5
     mu, rho = solve_num_mismatches(num_mismatches, num_alleles)
 
+    # Detach any future (negative-time) nodes so that samples can't copy from
+    # them. Node IDs are preserved, so the returned match paths stay valid.
+    ts = tree_ops.detach_future_nodes(ts)
     tsb, coord_map = make_tsb(ts, num_alleles, mirror_coordinates)
 
     work = []
@@ -1755,7 +1826,11 @@ def attach_tree(
             node = child_ts.node(u)
             sample_date = parse_date(node.metadata["date"])
             node_time[u] = (current_date - sample_date).days
-            assert node_time[u] >= 0.0
+            # Seed samples can be matched in on a date before their actual
+            # date, giving a negative ("in the future") node time.
+            assert node_time[u] >= 0.0 or (
+                node.flags & core.NODE_IS_UNCONDITIONALLY_INCLUDED
+            )
     max_sample_time = max(node_time.values())
 
     node_id_map = {}

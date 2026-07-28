@@ -657,6 +657,33 @@ def drop_vestigial_root_edge(ts):
     return tables.tree_sequence()
 
 
+def detach_future_nodes(ts):
+    """
+    Return a copy of ``ts`` in which every node with a negative ("in the
+    future") time is detached by removing all edges incident to it.
+
+    Such nodes are seed samples that were matched in on a date before their
+    actual date, and so lie in the future relative to the current time-zero.
+    Detaching them prevents other samples from copying from them during
+    matching. Node IDs are preserved so that any match paths referring to the
+    returned tree sequence remain valid against the original.
+    """
+    future = ts.nodes_time < 0
+    if not np.any(future):
+        return ts
+    tables = ts.dump_tables()
+    keep = ~(future[tables.edges.parent] | future[tables.edges.child])
+    num_detached = int(np.sum(future))
+    logger.debug(
+        f"Detaching {num_detached} future nodes "
+        f"({len(tables.edges) - int(np.sum(keep))} edges removed)"
+    )
+    tables.edges.keep_rows(keep)
+    tables.sort()
+    tables.build_index()
+    return tables.tree_sequence()
+
+
 def insert_vestigial_root_edge(ts):
     """
     Insert an edge between node 0 and 1 at the end of the edge table, if

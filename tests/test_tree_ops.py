@@ -957,3 +957,64 @@ class TestInsertVestigialRootEdge:
         ts = msprime.sim_ancestry(2)
         with pytest.raises(ValueError, match="Oldest edge"):
             tree_ops.insert_vestigial_root_edge(ts)
+
+
+def _future_node_ts(future_times=(-1,)):
+    """
+    A tiny tree sequence: a root (time 2) over a present-day node (time 1),
+    with a chain of ``future_times`` nodes hanging below it.
+    """
+    tables = tskit.TableCollection(sequence_length=10)
+    tables.nodes.add_row(time=2)  # 0: root
+    tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=1)  # 1: present
+    tables.edges.add_row(0, 10, parent=0, child=1)
+    parent = 1
+    for t in future_times:
+        child = tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=t)
+        tables.edges.add_row(0, 10, parent=parent, child=child)
+        parent = child
+    tables.sort()
+    tables.build_index()
+    return tables.tree_sequence()
+
+
+class TestDetachFutureNodes:
+    def _incident_edges(self, ts, node):
+        return [e for e in ts.edges() if e.parent == node or e.child == node]
+
+    def test_no_future_nodes_is_noop(self):
+        ts = _future_node_ts(future_times=())
+        result = tree_ops.detach_future_nodes(ts)
+        # Returned unchanged (same object) when there's nothing to do.
+        assert result is ts
+
+    def test_detaches_single_future_node(self):
+        ts = _future_node_ts(future_times=(-1,))
+        assert len(self._incident_edges(ts, 2)) == 1
+        result = tree_ops.detach_future_nodes(ts)
+        # Node preserved, but now isolated.
+        assert result.num_nodes == ts.num_nodes
+        assert result.nodes_time[2] == -1
+        assert self._incident_edges(result, 2) == []
+        # The non-future edge is retained.
+        assert result.num_edges == ts.num_edges - 1
+        retained = list(result.edges())
+        assert len(retained) == 1
+        assert retained[0].parent == 0
+        assert retained[0].child == 1
+
+    def test_detaches_chain_of_future_nodes(self):
+        ts = _future_node_ts(future_times=(-1, -2, -3))
+        result = tree_ops.detach_future_nodes(ts)
+        for node in (2, 3, 4):
+            assert self._incident_edges(result, node) == []
+        # Only the root -> present edge survives.
+        assert result.num_edges == 1
+        assert result.nodes_time[2] == -1
+        assert result.nodes_time[4] == -3
+
+    def test_node_ids_preserved(self):
+        ts = _future_node_ts(future_times=(-5,))
+        result = tree_ops.detach_future_nodes(ts)
+        nt.assert_array_equal(result.nodes_time, ts.nodes_time)
+        nt.assert_array_equal(result.nodes_flags, ts.nodes_flags)

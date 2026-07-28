@@ -350,6 +350,56 @@ class TestMatchTsinfer:
             assert mut.site_id == site_id
             assert mut.derived_state == sc2ts.IUPAC_ALLELES[allele]
 
+    def _extra_node_setup(self, node_time, site_id=5):
+        # A truncated reference tree sequence with one extra node hanging off
+        # the reference (node 1), carrying a single distinguishing mutation.
+        ts = util.initial_ts()
+        tables = ts.dump_tables()
+        tables.sites.truncate(20)
+        # Lift the base times so the reference sits well above time zero,
+        # mimicking a base_ts after several days of time increments. This
+        # leaves room to attach both present (positive-time) and future
+        # (negative-time) nodes below the reference.
+        tables.nodes.time += 10
+        ancestral = tables.sites[site_id].ancestral_state
+        derived = "A" if ancestral != "A" else "C"
+        u = tables.nodes.add_row(
+            flags=tskit.NODE_IS_SAMPLE,
+            time=node_time,
+            metadata={"strain": "extra", "date": "2030-01-01"},
+        )
+        tables.edges.add_row(0, ts.sequence_length, parent=1, child=u)
+        tables.mutations.add_row(site=site_id, node=u, derived_state=derived)
+        tables.sort()
+        tables.build_index()
+        ts = tables.tree_sequence()
+        # A sample whose haplotype exactly matches the extra node.
+        alignment = util.reference_array()
+        alignment[0] = "A"
+        h = jit.encode_alleles(alignment)[ts.sites_position.astype(int)]
+        h[site_id] = sc2ts.IUPAC_ALLELES.index(derived)
+        sample = si.Sample("test", "2020-01-01", haplotype=h)
+        return ts, u, sample, site_id
+
+    def test_matches_to_present_node(self):
+        # Sanity check: an ordinary (non-future) node that is an exact match IS
+        # copied from. This is the behaviour we suppress for future nodes.
+        ts, u, sample, site_id = self._extra_node_setup(node_time=0.5)
+        matches = self.match_tsinfer([sample], ts)
+        assert matches[0].parents == [u]
+        assert len(matches[0].mutations) == 0
+
+    def test_no_match_to_future_node(self):
+        # A future (negative-time) node that is an exact match must NOT be
+        # copied from; the sample falls back to the reference and carries the
+        # differing site as a mutation.
+        ts, u, sample, site_id = self._extra_node_setup(node_time=-5)
+        matches = self.match_tsinfer([sample], ts)
+        assert u not in matches[0].parents
+        assert matches[0].parents == [1]
+        assert len(matches[0].mutations) == 1
+        assert matches[0].mutations[0].site_id == site_id
+
 
 class TestMirrorTsCoords:
     def test_dense_sites_example(self):
@@ -430,6 +480,22 @@ class TestMirrorTsCoords:
         assert ts.num_sites == 10
         assert ts.num_mutations > 10
         self.check_double_mirror(ts)
+
+
+class TestNormaliseIncludeSamples:
+    def test_empty(self):
+        assert si.normalise_include_samples([]) == []
+
+    def test_bare_strings(self):
+        assert si.normalise_include_samples(["a", "b"]) == [("a", None), ("b", None)]
+
+    def test_tuples_and_lists(self):
+        result = si.normalise_include_samples([("a", "2021-01-01"), ["b", None], "c"])
+        assert result == [("a", "2021-01-01"), ("b", None), ("c", None)]
+
+    def test_malformed_date_raises(self):
+        with pytest.raises(ValueError, match="isoformat"):
+            si.normalise_include_samples([("a", "not-a-date")])
 
 
 class TestRealData:
@@ -551,7 +617,15 @@ class TestRealData:
         ts.tables.assert_equals(fx_ts_map["2020-02-02"].tables, ignore_provenance=True)
 
     @pytest.mark.parametrize(
-        "include_samples", (["SRR11597115"], ["SRR11597115", "NOSUCHSTRAIN"])
+        "include_samples",
+        (
+            ["SRR11597115"],
+            ["SRR11597115", "NOSUCHSTRAIN"],
+            # The tuple form with a None match date is equivalent to the
+            # bare-string form.
+            [("SRR11597115", None)],
+            [("SRR11597115", "2020-02-02")],
+        ),
     )
     def test_2020_02_02_include_samples(
         self,
@@ -584,6 +658,107 @@ class TestRealData:
         assert len(edges) == 1
         assert edges[0].left == 0
         assert edges[0].right == ts.sequence_length
+
+    def test_seed_early_match_date_negative_time(self, tmp_path, fx_ts_map, fx_dataset):
+        # SRR11597115's actual date is 2020-02-02; match it in two days early.
+        strain = "SRR11597115"
+        ts = run_extend(
+            dataset=fx_dataset,
+            base_ts=fx_ts_map["2020-01-30"],
+            date="2020-01-31",
+            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
+            include_samples=[(strain, "2020-01-31")],
+        )
+        assert strain in ts.metadata["sc2ts"]["samples_strain"]
+        u = ts.samples()[ts.metadata["sc2ts"]["samples_strain"].index(strain)]
+        assert ts.nodes_flags[u] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
+        # The node retains its actual date, two days in the future relative to
+        # the match-day time-zero, so its time is -2.
+        assert ts.nodes_time[u] == -2
+        # Matched without recombination: a single full-span parent edge, and
+        # the parent must be older (larger time) than the future-dated seed.
+        assert ts.nodes_flags[u] & sc2ts.NODE_IS_RECOMBINANT == 0
+        edges = [e for e in ts.edges() if e.child == u]
+        assert len(edges) == 1
+        assert edges[0].left == 0
+        assert edges[0].right == ts.sequence_length
+        assert ts.nodes_time[edges[0].parent] > ts.nodes_time[u]
+
+    def test_seed_early_match_date_evolves_over_days(
+        self, tmp_path, fx_ts_map, fx_dataset
+    ):
+        # Inject the seed two days before its actual date, then keep extending
+        # past the actual date. Its node time must rise by +1/day and hit 0 on
+        # the actual date, exercising the low-level matcher against a base_ts
+        # that contains negative ("future") node times.
+        strain = "SRR11597115"
+        include_samples = [(strain, "2020-01-31")]
+        base_path = tmp_path / "base.ts"
+        fx_ts_map["2020-01-30"].dump(base_path)
+        match_db = si.MatchDb.initialise(tmp_path / "match.db")
+        dates = ["2020-01-31", "2020-02-01", "2020-02-02", "2020-02-03"]
+        expected_time = {
+            "2020-01-31": -2,
+            "2020-02-01": -1,
+            "2020-02-02": 0,
+            "2020-02-03": 1,
+        }
+        for date in dates:
+            ts = si.extend(
+                dataset=fx_dataset.path,
+                base_ts=base_path,
+                date=date,
+                match_db=match_db.path,
+                include_samples=include_samples,
+            )
+            ts.dump(base_path)
+            strains = ts.metadata["sc2ts"]["samples_strain"]
+            # The seed is added exactly once and never double-processed on its
+            # natural date.
+            assert strains.count(strain) == 1
+            u = ts.samples()[strains.index(strain)]
+            assert ts.nodes_time[u] == expected_time[date]
+
+    def test_seed_excluded_on_natural_date(self, tmp_path, fx_ts_map, fx_dataset):
+        # A seed with an override match date must NOT be processed on its
+        # actual date. SRR11597115 is naturally sampled on 2020-02-02; with an
+        # override of 2020-01-31 it should be absent when we extend 2020-02-02.
+        strain = "SRR11597115"
+        ts = run_extend(
+            dataset=fx_dataset,
+            base_ts=fx_ts_map["2020-02-01"],
+            date="2020-02-02",
+            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
+            include_samples=[(strain, "2020-01-31")],
+        )
+        assert strain not in ts.metadata["sc2ts"]["samples_strain"]
+
+    def test_seed_override_date_no_samples(self, tmp_path, fx_ts_map, fx_dataset):
+        # An override match date with no naturally-sampled strains that day is
+        # never reached by the driver, so the seed is silently not injected.
+        # Here we simply confirm extend on such a date doesn't crash and the
+        # seed isn't added.
+        strain = "SRR11597115"
+        ts = run_extend(
+            dataset=fx_dataset,
+            base_ts=fx_ts_map["2020-02-01"],
+            date="2020-02-02",
+            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
+            include_samples=[(strain, "2020-02-12")],
+        )
+        assert strain not in ts.metadata["sc2ts"]["samples_strain"]
+
+    def test_seed_unknown_strain_with_override(self, tmp_path, fx_ts_map, fx_dataset):
+        # An unknown seed strain (even with an override date) is tolerated
+        # silently, as bare unknown strains already are.
+        ts = run_extend(
+            dataset=fx_dataset,
+            base_ts=fx_ts_map["2020-02-01"],
+            date="2020-02-02",
+            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
+            include_samples=[("NOSUCHSTRAIN", "2020-02-02")],
+        )
+        assert "NOSUCHSTRAIN" not in ts.metadata["sc2ts"]["samples_strain"]
 
     def test_2020_02_02_mutation_overlap(
         self,
