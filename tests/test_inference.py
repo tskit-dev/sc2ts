@@ -820,6 +820,28 @@ class TestRealData:
             group_ids.add(ts.node(u).metadata["sc2ts"]["group_id"])
         assert len(group_ids) == 2
 
+    def test_seed_excluded_from_standard_pipeline(self, tmp_path, fx_ts_map, fx_dataset):
+        # SRR11597190 is dated 2020-02-02 and is normally added on that date,
+        # but here it belongs to a group whose date is 2020-01-31. The group is
+        # therefore not inserted today, and the standard pipeline must not pick
+        # its members up either, so this day adds one sample fewer than
+        # test_2020_02_02 does.
+        base_ts = fx_ts_map["2020-02-01"]
+        ts = run_extend(
+            dataset=fx_dataset,
+            base_ts=base_ts,
+            date="2020-02-02",
+            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
+            seed_groups=[["SRR11494548", "SRR11597190"]],
+        )
+        base_strains = base_ts.metadata["sc2ts"]["samples_strain"]
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        added = [strain for strain in strains if strain not in base_strains]
+        assert "SRR11597190" not in added
+        assert "SRR11494548" not in added
+        assert ts.num_samples == 20
+        assert np.sum(ts.nodes_time[ts.samples()] == 0) == 3
+
     def test_seed_group_evolves_over_days(self, tmp_path, fx_ts_map, fx_dataset):
         # Insert the group on its minimum date, then keep extending past the
         # later member's actual date. That member's time must rise by +1/day and
