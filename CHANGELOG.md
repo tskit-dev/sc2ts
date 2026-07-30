@@ -4,15 +4,18 @@
 
 In development
 
-- Seed samples listed in `include_samples` are now matched separately from the
-  daily samples, with recombination effectively disallowed. These samples are
-  usually far diverged from the current ARG, which previously led to spurious
-  recombinations.
-
-- Entries in `include_samples` may now be `(strain, match_date)` tuples (in
-  addition to bare strain IDs). A non-None `match_date` matches the seed in on
-  that date instead of its actual date; it may be *before* the actual date, in
-  which case the seed node retains its actual date via a negative node time.
+- `include_samples` is now a list of seed *groups*, each a list of strain IDs
+  that are inserted into the ARG together as a single local tree. A tree is
+  inferred over the group's haplotypes, the haplotype of the group's inferred
+  ancestor is matched against the ARG with recombination disallowed, and the
+  whole group is then attached at that single placement. Seed samples are
+  usually far diverged from the current ARG, so matching each one individually
+  gave spurious recombinations or matches to derived samples with large
+  numbers of reversions; the inferred ancestor is much closer to the
+  contemporaneous ARG. A group is inserted on the minimum date over its
+  members, and members with later dates keep their real dates via negative
+  ("in the future") node times. The previous format (bare strain IDs, or
+  `(strain, match_date)` tuples) is no longer supported.
 
 - Add basic support for non-SARS-CoV-2 genomes via an optional reference FASTA.
   Supply `--reference` to `import-alignments` and a `reference_fasta` key in the

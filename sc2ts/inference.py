@@ -502,25 +502,54 @@ def preprocess(
     return samples
 
 
-def normalise_include_samples(include_samples):
+def check_include_samples(include_samples, metadata):
     """
-    Normalise the ``include_samples`` input to a canonical list of
-    ``(strain, match_date)`` tuples, where ``match_date`` is None if not
-    specified. Each input entry may be a bare strain string, or a
-    ``(strain, match_date)`` tuple/list of length 2. Any non-None match date
-    is validated as an ISO date string.
+    Check the ``include_samples`` seed specification and return it as a list of
+    tuples of strain IDs, one tuple per seed group.
+
+    Each entry must be a non-empty list of strain IDs which are inserted into
+    the ARG together as a single group. Every strain must be present in
+    ``metadata``, and no strain may appear in more than one group.
     """
-    normalised = []
+    groups = []
+    seen = {}
     for entry in include_samples:
-        if isinstance(entry, str):
-            strain, match_date = entry, None
-        else:
-            strain, match_date = entry
-        if match_date is not None:
-            # Validate; raises ValueError on a malformed date.
-            parse_date(match_date)
-        normalised.append((strain, match_date))
-    return normalised
+        if isinstance(entry, str) or not isinstance(entry, (list, tuple)):
+            raise ValueError(
+                f"Each include_samples entry must be a list of strain IDs, not {entry!r}"
+            )
+        if len(entry) == 0:
+            raise ValueError("include_samples groups must not be empty")
+        for strain in entry:
+            if not isinstance(strain, str):
+                raise ValueError(f"Seed strain IDs must be strings, not {strain!r}")
+        group = tuple(entry)
+        for strain in group:
+            if strain in seen:
+                raise ValueError(
+                    f"Seed sample {strain} appears in more than one "
+                    "include_samples group"
+                )
+            seen[strain] = group
+        groups.append(group)
+
+    missing = sorted(strain for strain in seen if strain not in metadata)
+    if len(missing) > 0:
+        raise ValueError(f"Seed samples not in dataset: {missing}")
+    return groups
+
+
+def seed_group_dates(include_samples, metadata):
+    """
+    Return a list of ``(date, strains)`` tuples, one per seed group, where
+    ``date`` is the minimum date over the group's members. The whole group is
+    inserted into the ARG on that date; members with later dates keep their
+    real dates and so get negative ("in the future") node times.
+    """
+    return [
+        (min(metadata[strain]["date"] for strain in group), group)
+        for group in include_samples
+    ]
 
 
 def extend(
@@ -552,16 +581,21 @@ def extend(
     Extend the base tree sequence by one day, matching in the samples for the
     given date.
 
-    ``include_samples`` is an optional list of "seed" samples that are matched
-    in unconditionally and without recombination. Each entry is either a bare
-    strain ID, or a ``(strain, match_date)`` tuple. When ``match_date`` is not
-    None the seed is matched in on ``match_date`` instead of its actual date;
-    this may be *before* the actual date, in which case the seed node retains
-    its actual date and is given a negative ("in the future") node time
-    relative to the match-day time-zero.
-    A ``match_date`` must be a date that is otherwise processed by the pipeline
-    (i.e. has real samples in the dataset); otherwise the seed is never
-    injected.
+    ``include_samples`` is an optional list of "seed" groups that are inserted
+    unconditionally and without recombination. Each entry is a list of strain
+    IDs which are inserted together as a single local tree: a tree is inferred
+    over the group's haplotypes, the haplotype of the group's inferred ancestor
+    is matched against the ARG, and the whole group is then attached at that
+    single placement. This places major saltations far better than matching
+    each seed individually, since the inferred ancestor is much closer to the
+    contemporaneous ARG than any of the group's leaves.
+
+    A group is inserted on the *minimum* date over its members. Members with
+    later dates keep their real dates and so are given negative ("in the
+    future") node times relative to that day's time-zero, becoming visible to
+    the matcher once their real date is reached. Because the insertion date is
+    always one of the group's own dataset dates, it is a date the pipeline
+    processes, unless it falls outside the run's date window.
     """
     if num_mismatches is None:
         num_mismatches = 3
@@ -587,7 +621,6 @@ def extend(
         deletions_as_missing = False
     if include_samples is None:
         include_samples = []
-    include_samples = normalise_include_samples(include_samples)
     base_ts = str(base_ts)
     dataset = str(dataset)
     match_db = str(match_db)
@@ -601,19 +634,7 @@ def extend(
     base_ts = tszip.load(base_ts)
     ds = _dataset.Dataset(dataset, date_field=date_field)
 
-    missing = sorted(
-        strain for strain, _ in include_samples if strain not in ds.metadata
-    )
-    if len(missing) > 0:
-        raise ValueError(f"Seed samples not in dataset: {missing}")
-    for strain, match_date in include_samples:
-        if match_date is not None:
-            actual_date = ds.metadata[strain]["date"]
-            if match_date > actual_date:
-                logger.warning(
-                    f"Seed sample {strain} match date {match_date} is after its "
-                    f"actual date {actual_date}; this is unusual for a seed sample"
-                )
+    include_samples = check_include_samples(include_samples, ds.metadata)
 
     with MatchDb(match_db) as matches:
         tables = _extend(
@@ -675,26 +696,26 @@ def _extend(
         f"mutations={base_ts.num_mutations};date={previous_date}"
     )
 
-    include_strains = {strain for strain, _ in include_samples}
-    # Seeds with an explicit match date are matched in on that date instead of
-    # their actual date, so we override which day they're processed on.
-    override_dates = {
-        strain: match_date
-        for strain, match_date in include_samples
-        if match_date is not None
+    # A seed group is inserted on the minimum date over its members, so a seed
+    # is processed on its group's date rather than on its own date.
+    group_dates = seed_group_dates(include_samples, dataset.metadata)
+    seed_date = {
+        strain: group_date for group_date, group in group_dates for strain in group
     }
+    todays_groups = [group for group_date, group in group_dates if group_date == date]
+    todays_seeds = {strain for group in todays_groups for strain in group}
 
     metadata_matches = {
         strain: dataset.metadata[strain]
         for strain in dataset.metadata.samples_for_date(date)
-        # Exclude a seed with an override match date from its actual date; it
-        # is processed only on the override date.
-        if override_dates.get(strain, date) == date
+        # Exclude a seed from any date other than its group's date; it is
+        # processed only once, on that date.
+        if seed_date.get(strain, date) == date
     }
-    # Inject seeds whose override match date is today but which aren't
-    # naturally sampled today. Missing strains are rejected up-front in extend().
-    for strain, match_date in override_dates.items():
-        if match_date == date and strain not in metadata_matches:
+    # Inject today's seeds that aren't naturally sampled today. Missing strains
+    # are rejected up-front in extend().
+    for strain in todays_seeds:
+        if strain not in metadata_matches:
             metadata_matches[strain] = dataset.metadata[strain]
 
     logger.info(f"Got {len(metadata_matches)} metadata matches")
@@ -710,7 +731,7 @@ def _extend(
     pango_lineage_key = "Viridian_pangolin"
     scorpio_key = "Viridian_scorpio"
 
-    unconditional_include_samples = []
+    seeds = {}
     samples = []
     for s in preprocessed_samples:
         if s.haplotype is None:
@@ -727,15 +748,26 @@ def _extend(
             f"Encoded {s.strain} {s.scorpio} {s.pango} missing={num_missing_sites} "
             f"deletions={num_deletion_sites}"
         )
-        if s.strain in include_strains:
+        if s.strain in todays_seeds:
+            # Seeds bypass the max_missing_sites and max_daily_samples filters.
             s.flags |= core.NODE_IS_UNCONDITIONALLY_INCLUDED
-            unconditional_include_samples.append(s)
+            seeds[s.strain] = s
         elif num_missing_sites <= max_missing_sites:
             samples.append(s)
         else:
             logger.debug(
                 f"Filter {s.strain}: missing={num_missing_sites} > {max_missing_sites}"
             )
+
+    # Seeds without a stored alignment are dropped from their group, and a
+    # group left with no members is skipped entirely.
+    todays_seed_groups = []
+    for group in todays_groups:
+        group_samples = [seeds[strain] for strain in group if strain in seeds]
+        if len(group_samples) == 0:
+            logger.warning(f"Skipping seed group with no usable samples: {list(group)}")
+        else:
+            todays_seed_groups.append(group_samples)
 
     if max_daily_samples is not None:
         if max_daily_samples < len(samples):
@@ -746,48 +778,24 @@ def _extend(
             samples = rng.sample(samples, max_daily_samples)
 
     ts = increment_time(date, base_ts)
-    if len(samples) + len(unconditional_include_samples) > 0:
-        if len(samples) > 0:
-            match_samples(
-                date,
-                samples,
-                base_ts=base_ts,
-                num_mismatches=num_mismatches,
-                deletions_as_missing=deletions_as_missing,
-                show_progress=show_progress,
-                num_threads=num_threads,
-                memory_limit=memory_limit,
-            )
-        if len(unconditional_include_samples) > 0:
-            # Seed samples are usually far diverged from the current ARG, and
-            # matching them with the standard num_mismatches gives spurious
-            # recombinations. Match them without recombination instead.
-            match_samples(
-                date,
-                unconditional_include_samples,
-                base_ts=base_ts,
-                num_mismatches=NO_RECOMBINATION_NUM_MISMATCHES,
-                deletions_as_missing=deletions_as_missing,
-                show_progress=show_progress,
-                num_threads=num_threads,
-                memory_limit=memory_limit,
-            )
-
-        samples = samples + unconditional_include_samples
-        samples.sort(key=lambda s: s.strain)
-
+    # A day can consist solely of seeds, but the retrospective query below must
+    # not run against a stale mask table, so this is unconditional.
+    match_db.create_mask_table(base_ts)
+    if len(samples) > 0:
+        match_samples(
+            date,
+            samples,
+            base_ts=base_ts,
+            num_mismatches=num_mismatches,
+            deletions_as_missing=deletions_as_missing,
+            show_progress=show_progress,
+            num_threads=num_threads,
+            memory_limit=memory_limit,
+        )
         characterise_match_mutations(base_ts, samples)
         characterise_recombinants(base_ts, samples)
 
-        for sample in unconditional_include_samples:
-            # We want this sample to included unconditionally, so we set the
-            # hmm cost to 0 < hmm_cost < hmm_cost_threshold. We use 0.5
-            # arbitrarily here to distinguish it from real one-mutation
-            sample.hmm_match.cost = 0.5
-            logger.warning(f"Unconditionally including {sample.summary()}")
-
         match_db.add(samples, date, show_progress)
-        match_db.create_mask_table(base_ts)
 
         ts = add_exact_matches(ts=ts, match_db=match_db, date=date)
 
@@ -801,6 +809,24 @@ def _extend(
             show_progress=show_progress,
             phase="close",
         )
+
+    if len(todays_seed_groups) > 0:
+        # Seeds are attached directly rather than via the MatchDb, so that a
+        # group can't be split up and can't be added a second time.
+        ts, seed_samples = add_seed_groups(
+            ts,
+            base_ts,
+            todays_seed_groups,
+            date,
+            num_mismatches=num_mismatches,
+            deletions_as_missing=deletions_as_missing,
+            show_progress=show_progress,
+            num_threads=num_threads,
+            memory_limit=memory_limit,
+        )
+        samples = samples + seed_samples
+
+    samples.sort(key=lambda s: s.strain)
 
     logger.info("Looking for retrospective matches")
     assert min_group_size is not None
@@ -935,6 +961,46 @@ def match_path_ts(group, sequence_length):
     return tables.tree_sequence()
 
 
+def flat_group_ts(ts, haplotypes, ancestral_haplotype, deletions_as_missing=False):
+    """
+    Return a "flat" (star) tree sequence in which each of the specified
+    haplotypes is a sample node hanging off a root carrying
+    ``ancestral_haplotype``.
+
+    Site positions and ancestral states are taken from ``ts``, and a mutation
+    is added wherever a haplotype's non-missing allele differs from
+    ``ancestral_haplotype``. Missing data therefore reads as the ancestral
+    state, exactly as it does in the trees built by ``match_path_ts``.
+    """
+    tables = tskit.TableCollection(ts.sequence_length)
+    tables.nodes.metadata_schema = tskit.MetadataSchema.permissive_json()
+    sites_position = ts.sites_position
+    sites_ancestral_state = ts.sites_ancestral_state
+    root = len(haplotypes)
+    site_id_map = {}
+    for h in haplotypes:
+        node_id = tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)
+        tables.edges.add_row(0, tables.sequence_length, parent=root, child=node_id)
+        if deletions_as_missing:
+            h = np.where(h == DELETION, MISSING, h)
+        (sites,) = np.where((h != ancestral_haplotype) & (h != MISSING))
+        for site_id in sites:
+            if site_id not in site_id_map:
+                site_id_map[site_id] = tables.sites.add_row(
+                    sites_position[site_id], sites_ancestral_state[site_id]
+                )
+            tables.mutations.add_row(
+                site=site_id_map[site_id],
+                node=node_id,
+                time=0,
+                derived_state=core.IUPAC_ALLELES[h[site_id]],
+            )
+    # add the root
+    tables.nodes.add_row(time=1)
+    tables.sort()
+    return tables.tree_sequence()
+
+
 def add_exact_matches(match_db, ts, date):
     where_clause = f"match_date=='{date}' AND hmm_cost==0"
     logger.info(f"Querying match DB WHERE: {where_clause}")
@@ -1015,6 +1081,10 @@ class SampleGroup:
     immediate_reversions: List = None
     sample_hash: str = None
     tree_quality_metrics: GroupTreeQualityMetrics = None
+    # Optionally, a pre-inferred (pi, tau) topology to use when building the
+    # group's local tree instead of inferring one. Must be trailing, because
+    # add_matching_results constructs SampleGroups positionally.
+    topology: tuple = None
 
     def __post_init__(self):
         m = hashlib.md5()
@@ -1067,26 +1137,15 @@ class SampleGroup:
         return self.tree_quality_metrics
 
 
-def add_matching_results(
-    where_clause,
-    match_db,
-    ts,
-    date,
-    min_group_size=1,
-    min_different_dates=1,
-    min_root_mutations=0,
-    max_mutations_per_sample=np.inf,
-    max_recurrent_mutations=np.inf,
-    max_pango_lineages=np.inf,
-    show_progress=False,
-    phase=None,
-):
+def add_matching_results(where_clause, match_db, ts, date, **kwargs):
+    """
+    Query the MatchDb, group the resulting matches by their path and set of
+    immediate reversions, and add each group into the ARG as a local tree.
+    """
     logger.info(f"Querying match DB WHERE: {where_clause}")
 
     # Group matches by path and set of immediate reversions.
     grouped_matches = collections.defaultdict(list)
-    site_missing_samples = np.zeros(ts.num_sites, dtype=int)
-    site_deletion_samples = np.zeros(ts.num_sites, dtype=int)
     num_samples = 0
     for sample in match_db.get(where_clause):
         assert all(mut.is_reversion is not None for mut in sample.hmm_match.mutations)
@@ -1116,7 +1175,29 @@ def add_matching_results(
         for key, samples in grouped_matches.items()
     ]
     logger.info(f"Got {len(groups)} groups for {num_samples} samples")
+    return add_sample_groups(ts, groups, date, **kwargs)
 
+
+def add_sample_groups(
+    ts,
+    groups,
+    date,
+    *,
+    min_group_size=1,
+    min_different_dates=1,
+    min_root_mutations=0,
+    max_mutations_per_sample=np.inf,
+    max_recurrent_mutations=np.inf,
+    max_pango_lineages=np.inf,
+    show_progress=False,
+    phase=None,
+):
+    """
+    Add each of the specified SampleGroups into the ARG as a local tree,
+    subject to the given quality thresholds.
+    """
+    site_missing_samples = np.zeros(ts.num_sites, dtype=int)
+    site_deletion_samples = np.zeros(ts.num_sites, dtype=int)
     tables = ts.dump_tables()
 
     attach_nodes = []
@@ -1143,7 +1224,7 @@ def add_matching_results(
             if flat_ts.num_mutations == 0 or flat_ts.num_samples == 1:
                 poly_ts = flat_ts
             else:
-                binary_ts = tree_ops.infer_binary(flat_ts)
+                binary_ts = tree_ops.infer_binary(flat_ts, group.topology)
                 poly_ts = tree_ops.trim_branches(binary_ts)
             assert poly_ts.num_samples == flat_ts.num_samples
             tqm = group.add_tree_quality_metrics(poly_ts, date)
@@ -1205,6 +1286,123 @@ def add_matching_results(
     ts = tree_ops.coalesce_mutations(ts, attach_nodes, date)
     ts = delete_immediate_reversion_nodes(ts, attach_nodes)
     return ts, added_groups
+
+
+def add_seed_groups(
+    ts,
+    base_ts,
+    seed_groups,
+    date,
+    *,
+    num_mismatches,
+    deletions_as_missing=False,
+    show_progress=False,
+    num_threads=0,
+    memory_limit=-1,
+):
+    """
+    Add the specified groups of seed samples into the ARG, one local tree per
+    group.
+
+    Rather than matching each seed against the ARG individually, we infer a
+    tree over each group's haplotypes, match the haplotype of the group's
+    inferred ancestor (with recombination disallowed), and then rebuild the
+    group's tree against that path so that the whole group is attached in one
+    piece. Seeds never go through the MatchDb: their matches are constructed
+    directly by forcing them down the ancestor's path.
+
+    Returns the updated tree sequence and the list of seed samples added.
+    """
+    reference = reference_haplotype(base_ts)
+    root_samples = []
+    pending = []
+    for samples in seed_groups:
+        flat_ts = flat_group_ts(
+            base_ts,
+            [s.haplotype for s in samples],
+            reference,
+            deletions_as_missing=deletions_as_missing,
+        )
+        topology = None
+        if flat_ts.num_samples > 1 and flat_ts.num_mutations > 0:
+            topology = tree_ops.infer_binary_topology(flat_ts)
+
+        if topology is None:
+            # Either a single sample, or a group that is identical to the
+            # reference at every non-missing site.
+            if len(samples) == 1:
+                root_haplotype = samples[0].haplotype.copy()
+            else:
+                root_haplotype = reference.copy()
+        else:
+            binary_ts = tree_ops.infer_binary(flat_ts, topology)
+            tree = binary_ts.first()
+            # The single child of the outgroup root is the group's MRCA.
+            mrca = tree.children(tree.root)[0]
+            root_haplotype = reference.copy()
+            site_index = np.searchsorted(
+                base_ts.sites_position, binary_ts.sites_position
+            )
+            root_haplotype[site_index] = node_haplotypes(binary_ts, [mrca])[0]
+
+        # Sites at which every member is missing are unknown at the root, so
+        # let the HMM ignore them rather than asserting the reference allele.
+        H = np.array([s.haplotype for s in samples])
+        root_haplotype[np.all(H == MISSING, axis=0)] = MISSING
+
+        group = SampleGroup(samples, topology=topology)
+        root_sample = Sample(
+            strain=f"seed_root_{group.sample_hash}",
+            date=date,
+            haplotype=root_haplotype,
+        )
+        root_samples.append(root_sample)
+        pending.append((group, root_sample))
+
+    # Seed samples are usually far diverged from the current ARG, and matching
+    # them with the standard num_mismatches gives spurious recombinations.
+    # Match the inferred ancestors without recombination instead.
+    match_samples(
+        date,
+        root_samples,
+        base_ts=base_ts,
+        num_mismatches=NO_RECOMBINATION_NUM_MISMATCHES,
+        deletions_as_missing=deletions_as_missing,
+        show_progress=show_progress,
+        num_threads=num_threads,
+        memory_limit=memory_limit,
+    )
+
+    groups = []
+    seed_samples = []
+    for group, root_sample in pending:
+        path = root_sample.hmm_match.path
+        parent_haplotype = path_haplotype(base_ts, path)
+        for sample in group:
+            force_match(
+                sample,
+                path,
+                parent_haplotype,
+                base_ts.sites_position,
+                deletions_as_missing,
+                num_mismatches,
+            )
+            logger.warning(f"Unconditionally including {sample.summary()}")
+        group.path = tuple(path)
+        group.immediate_reversions = ()
+        groups.append(group)
+        seed_samples.extend(group.samples)
+
+    characterise_recombinants(base_ts, seed_samples)
+    ts, _ = add_sample_groups(
+        ts,
+        groups,
+        date,
+        min_group_size=1,
+        show_progress=show_progress,
+        phase="seed",
+    )
+    return ts, seed_samples
 
 
 def solve_num_mismatches(k, num_alleles=5):
@@ -1759,6 +1957,84 @@ def extract_haplotypes(ts, samples):
     for node_id in samples:
         ret.append(H[unique_samples.index(node_id)])
     return ret
+
+
+def node_haplotypes(ts, nodes):
+    """
+    Return the haplotype of each of the specified nodes, using the integer
+    allele encoding defined by ``core.IUPAC_ALLELES``.
+
+    This is the encoding used by ``Sample.haplotype``. Note that
+    ``extract_haplotypes`` is *not* equivalent: it returns per-site allele
+    indexes local to each site rather than IUPAC codes.
+    """
+    # Annoyingly tskit doesn't allow us to specify duplicate samples, which can
+    # happen perfectly well here, so we must work around.
+    unique_nodes = list(set(nodes))
+    H = ts.genotype_matrix(
+        samples=unique_nodes,
+        alleles=tuple(core.IUPAC_ALLELES),
+        isolated_as_missing=False,
+    ).T
+    return [H[unique_nodes.index(node_id)] for node_id in nodes]
+
+
+def reference_haplotype(ts):
+    """
+    Return the haplotype of the ARG's ancestral (reference) sequence, i.e. the
+    ancestral state of each site, in the ``core.IUPAC_ALLELES`` encoding.
+    """
+    return jit.encode_alleles(np.asarray(ts.sites_ancestral_state, dtype="U1"))
+
+
+def path_haplotype(ts, path):
+    """
+    Return the haplotype copied along the specified HMM path, in the
+    ``core.IUPAC_ALLELES`` encoding.
+    """
+    H = node_haplotypes(ts, [seg.parent for seg in path])
+    h = np.zeros(ts.num_sites, dtype=np.int8)
+    for seg, parent_haplotype in zip(path, H):
+        left, right = np.searchsorted(ts.sites_position, [seg.left, seg.right])
+        h[left:right] = parent_haplotype[left:right]
+    return h
+
+
+def force_match(
+    sample,
+    path,
+    parent_haplotype,
+    sites_position,
+    deletions_as_missing,
+    num_mismatches,
+):
+    """
+    Set the sample's ``hmm_match`` to the match obtained by forcing it down the
+    specified path, with one mutation at each site where the sample's
+    non-missing haplotype differs from the haplotype copied along the path.
+    """
+    h = sample.haplotype
+    if deletions_as_missing:
+        h = np.where(h == DELETION, MISSING, h)
+    (sites,) = np.where(
+        (h != parent_haplotype) & (h != MISSING) & (parent_haplotype != MISSING)
+    )
+    mutations = [
+        MatchMutation(
+            derived_state=core.IUPAC_ALLELES[h[site_id]],
+            inherited_state=core.IUPAC_ALLELES[parent_haplotype[site_id]],
+            site_id=int(site_id),
+            site_position=int(sites_position[site_id]),
+            # A forced path has no HMM-match artefacts, so there are no
+            # reversions to mark up for tree building. Parsimony over the full
+            # haplotypes handles reversions on the group's root branch instead.
+            is_reversion=False,
+            is_immediate_reversion=False,
+        )
+        for site_id in sites
+    ]
+    sample.hmm_match = HmmMatch(list(path), mutations)
+    sample.hmm_match.compute_cost(num_mismatches)
 
 
 def characterise_recombinants(ts, samples):

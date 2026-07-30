@@ -422,7 +422,7 @@ class TestInfer:
             tmp_path,
             fx_dataset,
             exclude_sites=[56, 57, 58, 59, 60],
-            include_samples=["SRR14631544"],
+            include_samples=[["SRR14631544"]],
         )
         runner = ct.CliRunner()
         result = runner.invoke(
@@ -446,7 +446,7 @@ class TestInfer:
             tmp_path,
             fx_dataset,
             exclude_sites=[56, 57, 58, 59, 60],
-            include_samples=["SRR14631544", "NO_SUCH_STRAIN"],
+            include_samples=[["SRR14631544"], ["NO_SUCH_STRAIN"]],
         )
         runner = ct.CliRunner()
         with pytest.raises(ValueError, match="not in dataset"):
@@ -456,27 +456,22 @@ class TestInfer:
                 catch_exceptions=False,
             )
 
-    def test_include_samples_with_dates(self, tmp_path, fx_ts_map, fx_dataset):
-        # The (strain, date) tuple form is expressed in TOML as a 2-element
-        # array, mixed with bare strings.
+    def test_include_samples_bare_string(self, tmp_path, fx_ts_map, fx_dataset):
+        # A bare strain ID is the old format and is rejected: TOML entries must
+        # be arrays of strain IDs.
         config_file = self.make_config(
             tmp_path,
             fx_dataset,
             exclude_sites=[56, 57, 58, 59, 60],
-            include_samples=[["SRR14631544", "2020-01-01"]],
+            include_samples=["SRR14631544"],
         )
         runner = ct.CliRunner()
-        result = runner.invoke(
-            cli.cli,
-            f"infer {config_file} --stop 2020-01-02",
-            catch_exceptions=False,
-        )
-        assert result.exit_code == 0
-        date = "2020-01-01"
-        ts_path = tmp_path / "results" / "test" / f"test_{date}.ts"
-        ts = tskit.load(ts_path)
-        assert "SRR14631544" in ts.metadata["sc2ts"]["samples_strain"]
-        assert ts.num_samples == 1
+        with pytest.raises(ValueError, match="must be a list of strain IDs"):
+            runner.invoke(
+                cli.cli,
+                f"infer {config_file} --stop 2020-01-02",
+                catch_exceptions=False,
+            )
 
     def test_override(self, tmp_path, fx_ts_map, fx_dataset):
         hmm_cost_threshold = 47

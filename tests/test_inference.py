@@ -482,20 +482,66 @@ class TestMirrorTsCoords:
         self.check_double_mirror(ts)
 
 
-class TestNormaliseIncludeSamples:
+class TestCheckIncludeSamples:
+    metadata = {
+        "a": {"date": "2021-01-03"},
+        "b": {"date": "2021-01-01"},
+        "c": {"date": "2021-01-02"},
+    }
+
     def test_empty(self):
-        assert si.normalise_include_samples([]) == []
+        assert si.check_include_samples([], self.metadata) == []
 
-    def test_bare_strings(self):
-        assert si.normalise_include_samples(["a", "b"]) == [("a", None), ("b", None)]
+    def test_groups(self):
+        result = si.check_include_samples([["a", "b"], ["c"]], self.metadata)
+        assert result == [("a", "b"), ("c",)]
 
-    def test_tuples_and_lists(self):
-        result = si.normalise_include_samples([("a", "2021-01-01"), ["b", None], "c"])
-        assert result == [("a", "2021-01-01"), ("b", None), ("c", None)]
+    def test_tuples_accepted(self):
+        assert si.check_include_samples([("a",)], self.metadata) == [("a",)]
 
-    def test_malformed_date_raises(self):
-        with pytest.raises(ValueError, match="isoformat"):
-            si.normalise_include_samples([("a", "not-a-date")])
+    def test_bare_string_raises(self):
+        with pytest.raises(ValueError, match="must be a list of strain IDs"):
+            si.check_include_samples(["a"], self.metadata)
+
+    def test_empty_group_raises(self):
+        with pytest.raises(ValueError, match="must not be empty"):
+            si.check_include_samples([[]], self.metadata)
+
+    def test_non_string_strain_raises(self):
+        with pytest.raises(ValueError, match="must be strings"):
+            si.check_include_samples([["a", 7]], self.metadata)
+
+    def test_duplicate_strain_raises(self):
+        with pytest.raises(ValueError, match="more than one include_samples group"):
+            si.check_include_samples([["a", "b"], ["a"]], self.metadata)
+
+    def test_duplicate_within_group_raises(self):
+        with pytest.raises(ValueError, match="more than one include_samples group"):
+            si.check_include_samples([["a", "a"]], self.metadata)
+
+    def test_missing_strain_raises(self):
+        with pytest.raises(ValueError, match="not in dataset"):
+            si.check_include_samples([["a", "nosuchstrain"]], self.metadata)
+
+
+class TestSeedGroupDates:
+    metadata = {
+        "a": {"date": "2021-01-03"},
+        "b": {"date": "2021-01-01"},
+        "c": {"date": "2021-01-02"},
+    }
+
+    def test_group_gets_minimum_date(self):
+        result = si.seed_group_dates([("a", "b")], self.metadata)
+        assert result == [("2021-01-01", ("a", "b"))]
+
+    def test_singleton_gets_own_date(self):
+        result = si.seed_group_dates([("a",)], self.metadata)
+        assert result == [("2021-01-03", ("a",))]
+
+    def test_multiple_groups(self):
+        result = si.seed_group_dates([("a",), ("b", "c")], self.metadata)
+        assert result == [("2021-01-03", ("a",)), ("2021-01-01", ("b", "c"))]
 
 
 class TestRealData:
@@ -616,29 +662,18 @@ class TestRealData:
         assert "SRR11597115" not in ts.metadata["sc2ts"]["samples_strain"]
         ts.tables.assert_equals(fx_ts_map["2020-02-02"].tables, ignore_provenance=True)
 
-    @pytest.mark.parametrize(
-        "include_samples",
-        (
-            ["SRR11597115"],
-            # The tuple form with a None match date is equivalent to the
-            # bare-string form.
-            [("SRR11597115", None)],
-            [("SRR11597115", "2020-02-02")],
-        ),
-    )
     def test_2020_02_02_include_samples(
         self,
         tmp_path,
         fx_ts_map,
         fx_dataset,
-        include_samples,
     ):
         ts = run_extend(
             dataset=fx_dataset,
             base_ts=fx_ts_map["2020-02-01"],
             date="2020-02-02",
             match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=include_samples,
+            include_samples=[["SRR11597115"]],
         )
         assert ts.metadata["sc2ts"]["cumulative_stats"]["exact_matches"]["pango"] == {
             "A": 2,
@@ -658,75 +693,107 @@ class TestRealData:
         assert edges[0].left == 0
         assert edges[0].right == ts.sequence_length
 
-    def test_seed_early_match_date_negative_time(self, tmp_path, fx_ts_map, fx_dataset):
-        # SRR11597115's actual date is 2020-02-02; match it in two days early.
-        strain = "SRR11597115"
+    def test_seed_group_inserted_on_minimum_date(self, tmp_path, fx_ts_map, fx_dataset):
+        # SRR11494548 is dated 2020-01-31 and SRR11597115 2020-02-02. As one
+        # group they go in together on the minimum date, 2020-01-31, so the
+        # later-dated member sits two days in the future at time -2.
+        group = ["SRR11494548", "SRR11597115"]
         ts = run_extend(
             dataset=fx_dataset,
             base_ts=fx_ts_map["2020-01-30"],
             date="2020-01-31",
             match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=[(strain, "2020-01-31")],
+            include_samples=[group],
         )
-        assert strain in ts.metadata["sc2ts"]["samples_strain"]
-        u = ts.samples()[ts.metadata["sc2ts"]["samples_strain"].index(strain)]
-        assert ts.nodes_flags[u] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
-        # The node retains its actual date, two days in the future relative to
-        # the match-day time-zero, so its time is -2.
-        assert ts.nodes_time[u] == -2
-        # Matched without recombination: a single full-span parent edge, and
-        # the parent must be older (larger time) than the future-dated seed.
-        assert ts.nodes_flags[u] & sc2ts.NODE_IS_RECOMBINANT == 0
-        edges = [e for e in ts.edges() if e.child == u]
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        nodes = {}
+        for strain in group:
+            assert strain in strains
+            u = ts.samples()[strains.index(strain)]
+            nodes[strain] = u
+            assert ts.nodes_flags[u] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
+            assert ts.nodes_flags[u] & sc2ts.NODE_IS_RECOMBINANT == 0
+        assert ts.nodes_time[nodes["SRR11494548"]] == 0
+        assert ts.nodes_time[nodes["SRR11597115"]] == -2
+        # Both members belong to the same sample group.
+        group_ids = {ts.node(u).metadata["sc2ts"]["group_id"] for u in nodes.values()}
+        assert len(group_ids) == 1
+
+    def test_seed_group_attached_as_one_tree(self, tmp_path, fx_ts_map, fx_dataset):
+        # The whole point of grouping: members that share an ancestor are hung
+        # off a single internal node, and it is that node which gets placed
+        # against the ARG. ERR4206180 (2020-02-09) and ERR4206593 (2020-02-13)
+        # share five derived alleles, so their inferred ancestor is distinct
+        # from both of them and from the reference.
+        group = ["ERR4206180", "ERR4206593"]
+        base_ts = fx_ts_map["2020-02-08"]
+        ts = run_extend(
+            dataset=fx_dataset,
+            base_ts=base_ts,
+            date="2020-02-09",
+            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
+            include_samples=[group],
+        )
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        nodes = [ts.samples()[strains.index(strain)] for strain in group]
+        group_id = ts.node(nodes[0]).metadata["sc2ts"]["group_id"]
+        assert ts.nodes_time[nodes[0]] == 0
+        assert ts.nodes_time[nodes[1]] == -4
+
+        tree = ts.first()
+        parents = {tree.parent(u) for u in nodes}
+        assert len(parents) == 1
+        mrca = parents.pop()
+        # The shared parent is an internal node belonging to the same group.
+        assert mrca not in nodes
+        assert ts.node(mrca).metadata["sc2ts"]["group_id"] == group_id
+        # It hangs off the pre-existing ARG by a single full-span edge.
+        edges = [e for e in ts.edges() if e.child == mrca]
         assert len(edges) == 1
         assert edges[0].left == 0
         assert edges[0].right == ts.sequence_length
-        assert ts.nodes_time[edges[0].parent] > ts.nodes_time[u]
+        assert edges[0].parent < base_ts.num_nodes
+        # The mutations separating the group's inferred root from its match sit
+        # on that node, not on the individual members.
+        assert np.sum(ts.mutations_node == mrca) > 0
 
-    def test_seed_match_date_equals_actual_date(self, tmp_path, fx_ts_map, fx_dataset):
-        # An override match date equal to the sample's actual date behaves like
-        # an ordinary seed: the node is present-dated (time 0), not in the
-        # future. SRR11597115's actual date is 2020-02-02.
-        strain = "SRR11597115"
+    def test_two_seed_groups_stay_separate(self, tmp_path, fx_ts_map, fx_dataset):
+        # Two independent single-strain groups on the same date must not be
+        # merged into one group.
         ts = run_extend(
             dataset=fx_dataset,
             base_ts=fx_ts_map["2020-02-01"],
             date="2020-02-02",
             match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=[(strain, "2020-02-02")],
+            include_samples=[["SRR11597115"], ["SRR11597190"]],
         )
-        assert strain in ts.metadata["sc2ts"]["samples_strain"]
-        u = ts.samples()[ts.metadata["sc2ts"]["samples_strain"].index(strain)]
-        assert ts.nodes_flags[u] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
-        # match date == actual date, so the node sits at time zero.
-        assert ts.nodes_time[u] == 0
-        # Still matched without recombination: a single full-span parent edge.
-        assert ts.nodes_flags[u] & sc2ts.NODE_IS_RECOMBINANT == 0
-        edges = [e for e in ts.edges() if e.child == u]
-        assert len(edges) == 1
-        assert edges[0].left == 0
-        assert edges[0].right == ts.sequence_length
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        group_ids = set()
+        for strain in ["SRR11597115", "SRR11597190"]:
+            assert strain in strains
+            u = ts.samples()[strains.index(strain)]
+            assert ts.nodes_flags[u] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
+            group_ids.add(ts.node(u).metadata["sc2ts"]["group_id"])
+        assert len(group_ids) == 2
 
-    def test_seed_early_match_date_evolves_over_days(
-        self, tmp_path, fx_ts_map, fx_dataset
-    ):
-        # Inject the seed two days before its actual date, then keep extending
-        # past the actual date. Its node time must rise by +1/day and hit 0 on
-        # the actual date, exercising the low-level matcher against a base_ts
-        # that contains negative ("future") node times.
-        strain = "SRR11597115"
-        include_samples = [(strain, "2020-01-31")]
+    def test_seed_group_evolves_over_days(self, tmp_path, fx_ts_map, fx_dataset):
+        # Insert the group on its minimum date, then keep extending past the
+        # later member's actual date. That member's time must rise by +1/day and
+        # hit 0 on its actual date, exercising the low-level matcher against a
+        # base_ts containing negative ("future") node times. It must also not be
+        # re-added on its natural date.
+        group = ["SRR11494548", "SRR11597115"]
+        include_samples = [group]
         base_path = tmp_path / "base.ts"
         fx_ts_map["2020-01-30"].dump(base_path)
         match_db = si.MatchDb.initialise(tmp_path / "match.db")
-        dates = ["2020-01-31", "2020-02-01", "2020-02-02", "2020-02-03"]
         expected_time = {
             "2020-01-31": -2,
             "2020-02-01": -1,
             "2020-02-02": 0,
             "2020-02-03": 1,
         }
-        for date in dates:
+        for date, expected in expected_time.items():
             ts = si.extend(
                 dataset=fx_dataset.path,
                 base_ts=base_path,
@@ -736,54 +803,26 @@ class TestRealData:
             )
             ts.dump(base_path)
             strains = ts.metadata["sc2ts"]["samples_strain"]
-            # The seed is added exactly once and never double-processed on its
-            # natural date.
-            assert strains.count(strain) == 1
-            u = ts.samples()[strains.index(strain)]
-            assert ts.nodes_time[u] == expected_time[date]
-
-    def test_seed_excluded_on_natural_date(self, tmp_path, fx_ts_map, fx_dataset):
-        # A seed with an override match date must NOT be processed on its
-        # actual date. SRR11597115 is naturally sampled on 2020-02-02; with an
-        # override of 2020-01-31 it should be absent when we extend 2020-02-02.
-        strain = "SRR11597115"
-        ts = run_extend(
-            dataset=fx_dataset,
-            base_ts=fx_ts_map["2020-02-01"],
-            date="2020-02-02",
-            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=[(strain, "2020-01-31")],
-        )
-        assert strain not in ts.metadata["sc2ts"]["samples_strain"]
-
-    def test_seed_override_date_no_samples(self, tmp_path, fx_ts_map, fx_dataset):
-        # An override match date with no naturally-sampled strains that day is
-        # never reached by the driver, so the seed is silently not injected.
-        # Here we simply confirm extend on such a date doesn't crash and the
-        # seed isn't added.
-        strain = "SRR11597115"
-        ts = run_extend(
-            dataset=fx_dataset,
-            base_ts=fx_ts_map["2020-02-01"],
-            date="2020-02-02",
-            match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=[(strain, "2020-02-12")],
-        )
-        assert strain not in ts.metadata["sc2ts"]["samples_strain"]
+            # Each member is added exactly once, and never double-processed on
+            # its natural date.
+            for strain in group:
+                assert strains.count(strain) == 1
+            u = ts.samples()[strains.index("SRR11597115")]
+            assert ts.nodes_time[u] == expected
 
     @pytest.mark.parametrize(
         "include_samples",
         (
-            ["SRR11597115", "NOSUCHSTRAIN"],
-            [("NOSUCHSTRAIN", "2020-02-02")],
-            [("NOSUCHSTRAIN", None)],
+            [["SRR11597115"], ["NOSUCHSTRAIN"]],
+            [["SRR11597115", "NOSUCHSTRAIN"]],
+            [["NOSUCHSTRAIN"]],
         ),
     )
     def test_seed_missing_strain_raises(
         self, tmp_path, fx_ts_map, fx_dataset, include_samples
     ):
-        # A seed strain that isn't in the dataset is an error, whether it's a
-        # bare strain or carries an override match date.
+        # A seed strain that isn't in the dataset is an error, whether it's on
+        # its own or grouped with a strain that does exist.
         with pytest.raises(ValueError, match="not in dataset"):
             run_extend(
                 dataset=fx_dataset,
@@ -791,6 +830,17 @@ class TestRealData:
                 date="2020-02-02",
                 match_db=si.MatchDb.initialise(tmp_path / "match.db"),
                 include_samples=include_samples,
+            )
+
+    def test_seed_bare_string_raises(self, tmp_path, fx_ts_map, fx_dataset):
+        # The old format (a bare strain ID) is no longer accepted.
+        with pytest.raises(ValueError, match="must be a list of strain IDs"):
+            run_extend(
+                dataset=fx_dataset,
+                base_ts=fx_ts_map["2020-02-01"],
+                date="2020-02-02",
+                match_db=si.MatchDb.initialise(tmp_path / "match.db"),
+                include_samples=["SRR11597115"],
             )
 
     def test_2020_02_02_mutation_overlap(

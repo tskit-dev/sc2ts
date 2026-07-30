@@ -82,8 +82,18 @@ num_threads=-1
 # limit.
 memory_limit=32
 
-# A list of sample IDs (strings) for unconditional inclusion (e.g., to 
-# help seed major saltation events).
+# A list of "seed" groups for unconditional inclusion (e.g., to help seed
+# major saltation events). Each entry is a list of sample IDs that are
+# inserted into the ARG together as a single local tree: a tree is inferred
+# over the group's haplotypes, the haplotype of the group's inferred ancestor
+# is matched against the ARG without recombination, and the whole group is
+# attached at that single placement.
+#
+# A group is inserted on the *minimum* date over its members. Members with
+# later dates keep their real dates, and so are given negative ("in the
+# future") node times until their real date is reached.
+#
+#   include_samples=[["BA.1_strain_a", "BA.1_strain_b"], ["BA.2_strain_c"]]
 include_samples=[]
 
 # Override specific parameter values over a time period.
