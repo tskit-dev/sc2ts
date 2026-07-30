@@ -148,23 +148,12 @@ def add_tree_to_tables(tables, pi, tau):
             tables.edges.add_row(0, L, parent, u)
 
 
-def infer_binary_topology(ts):
-    """
-    Infer a strictly binary topology from the variation data in the specified
-    tree sequence, returning it as an oriented forest ``(pi, tau)``.
-
-    The root of ``ts`` is included as an outgroup in the tree building so that
-    the unrooted NJ tree can be rooted; node ``ts.num_samples`` in the returned
-    arrays is that outgroup, and is the root of the returned topology.
-
-    Returns ``None`` if there are fewer than two samples, in which case there
-    is no topology to infer.
-    """
+def infer_binary_topology(ts, tables):
     assert ts.num_trees == 1
     assert ts.num_mutations > 0
 
     if ts.num_samples < 2:
-        return None
+        return tables.tree_sequence()
 
     samples = ts.samples()
     tree = ts.first()
@@ -187,23 +176,20 @@ def infer_binary_topology(ts):
     # Node n - 1 is the pre-specified root, so force rerooting around that.
     reroot(pi, n - 1)
 
-    assert n == ts.num_samples + 1
+    assert n == len(tables.nodes) + 1
     tau = max_leaf_distance(pi, n)
     tau /= max(1, np.max(tau))
-    return pi, tau
+    add_tree_to_tables(tables, pi, tau)
+    tables.sort()
+
+    return tables.tree_sequence()
 
 
 # TODO rename this to infer_sample_group_tree
-def infer_binary(ts, topology=None):
+def infer_binary(ts):
     """
     Infer a strictly binary tree from the variation data in the
     specified tree sequence.
-
-    If ``topology`` is not None it must be an oriented forest ``(pi, tau)`` as
-    returned by :func:`infer_binary_topology`, and is used directly instead of
-    inferring the topology from ``ts``. This lets a group's topology be
-    inferred once and then reused when the mutations are re-mapped against a
-    different ancestral haplotype.
     """
     assert ts.num_trees == 1
     assert list(ts.samples()) == list(range(ts.num_samples))
@@ -216,11 +202,7 @@ def infer_binary(ts, topology=None):
     tables.nodes.truncate(ts.num_samples)
 
     # Update the tables with the topology
-    if topology is None:
-        topology = infer_binary_topology(ts)
-    if topology is not None:
-        add_tree_to_tables(tables, *topology)
-        tables.sort()
+    infer_binary_topology(ts, tables)
     binary_ts = tables.tree_sequence()
 
     # Now add on mutations under parsimony

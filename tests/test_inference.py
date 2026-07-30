@@ -561,22 +561,21 @@ class TestInferSeedGroupRoot:
 
     def infer(self, haplotypes):
         ts = self.base_ts
-        return si.infer_seed_group_root(ts, haplotypes, si.reference_haplotype(ts))
+        samples = [si.Sample(f"s{j}", haplotype=h) for j, h in enumerate(haplotypes)]
+        return si.infer_seed_group_root(ts, samples, si.reference_haplotype(ts))
 
     def test_single_haplotype(self):
         h = self.haplotype({4: "T"})
-        topology, root = self.infer([h])
+        root = self.infer([h])
         # Nothing to infer over one sample: the ancestor is the sample.
-        assert topology is None
         nt.assert_array_equal(root, h)
         assert root is not h
 
     def test_identical_to_reference(self):
         reference = si.reference_haplotype(self.base_ts)
-        topology, root = self.infer([self.haplotype(), self.haplotype()])
+        root = self.infer([self.haplotype(), self.haplotype()])
         # No mutations, so there is no tree to infer and the ancestor is the
         # reference.
-        assert topology is None
         nt.assert_array_equal(root, reference)
 
     def test_shared_derived_allele(self):
@@ -585,8 +584,7 @@ class TestInferSeedGroupRoot:
             self.haplotype({4: "T", 12: "A"}),
             self.haplotype({4: "T", 21: "A"}),
         ]
-        topology, root = self.infer(haplotypes)
-        assert topology is not None
+        root = self.infer(haplotypes)
         # The ancestor carries the shared mutation but neither private one.
         expected = reference.copy()
         expected[4] = jit.encode_alleles(np.array(["T"]))[0]
@@ -598,7 +596,7 @@ class TestInferSeedGroupRoot:
             h = self.haplotype({pos: "A"})
             h[4] = si.MISSING
             haplotypes.append(h)
-        _, root = self.infer(haplotypes)
+        root = self.infer(haplotypes)
         # Every member is missing at site 4, so the ancestor is unknown there
         # rather than asserting the reference allele.
         assert root[4] == si.MISSING
@@ -606,8 +604,183 @@ class TestInferSeedGroupRoot:
     def test_partially_missing_site_is_not_missing(self):
         haplotypes = [self.haplotype({4: "T"}), self.haplotype()]
         haplotypes[1][4] = si.MISSING
-        _, root = self.infer(haplotypes)
+        root = self.infer(haplotypes)
         assert root[4] != si.MISSING
+
+
+class TestFlatGroupTs:
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT"
+
+    @property
+    def base_ts(self):
+        return si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+
+    def haplotype(self, mutations=None):
+        h = list(self.reference)
+        for pos, base in (mutations or {}).items():
+            h[pos] = base
+        return jit.encode_alleles(np.array(h))
+
+    def sample(self, strain, mutations=None):
+        sample = si.Sample(strain, date="2020-01-01", metadata={"date": "2020-01-01"})
+        sample.haplotype = self.haplotype(mutations)
+        sample.alignment_composition = {}
+        sample.hmm_match = si.HmmMatch([si.PathSegment(0, 31, 1)], [])
+        return sample
+
+    def test_mutations_relative_to_ancestral_haplotype(self):
+        ts = self.base_ts
+        # An ancestral haplotype that is not the reference: the sample matches it
+        # at position 4 and differs from it at 8.
+        ancestral = self.haplotype({4: "T", 8: "A"})
+        samples = [self.sample("a", {4: "T"})]
+        flat_ts = si.flat_group_ts(ts, samples, ancestral)
+        # Only position 8 is variable, and its ancestral state is the ancestral
+        # haplotype's allele rather than the reference's.
+        assert flat_ts.num_sites == 1
+        site = flat_ts.site(0)
+        assert site.position == 9
+        assert site.ancestral_state == "A"
+        assert [m.derived_state for m in site.mutations] == ["G"]
+
+    def test_missing_reads_as_ancestral(self):
+        ts = self.base_ts
+        h = self.haplotype()
+        h[4] = si.MISSING
+        samples = [self.sample("a")]
+        samples[0].haplotype = h
+        flat_ts = si.flat_group_ts(ts, samples, self.haplotype({4: "T"}))
+        assert flat_ts.num_mutations == 0
+
+    def test_deletions_as_missing(self):
+        ts = self.base_ts
+        samples = [self.sample("a", {4: "-"})]
+        reference = si.reference_haplotype(ts)
+        assert si.flat_group_ts(ts, samples, reference).num_mutations == 1
+        flat_ts = si.flat_group_ts(ts, samples, reference, deletions_as_missing=True)
+        assert flat_ts.num_mutations == 0
+
+    def test_bare_nodes_without_group_id(self):
+        ts = self.base_ts
+        samples = [self.sample("a", {4: "T"})]
+        flat_ts = si.flat_group_ts(ts, samples, si.reference_haplotype(ts))
+        assert flat_ts.num_samples == 1
+        assert flat_ts.node(0).metadata == {}
+
+    def test_full_metadata_with_group_id(self):
+        ts = self.base_ts
+        samples = [self.sample("a", {4: "T"})]
+        flat_ts = si.flat_group_ts(
+            ts, samples, si.reference_haplotype(ts), group_id="abc"
+        )
+        md = flat_ts.node(0).metadata
+        assert md["date"] == "2020-01-01"
+        assert md["sc2ts"]["group_id"] == "abc"
+        assert md["sc2ts"]["hmm_match"] == samples[0].hmm_match.asdict()
+
+    def test_missing_ancestral_allele_rejected(self):
+        ts = self.base_ts
+        ancestral = si.reference_haplotype(ts)
+        ancestral[4] = si.MISSING
+        with pytest.raises(AssertionError):
+            si.flat_group_ts(ts, [self.sample("a")], ancestral)
+
+
+class TestSeedGroupAttachment:
+    """
+    A seed group's local tree must be inferred against the haplotype of the node
+    its ancestor matched to, not against the reference, because attach_tree hangs
+    the group's root children directly off that node.
+    """
+
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT"
+    # The day-one sample the group's ancestor will match to. It shares three
+    # mutations with the group, and has a fourth at position 12 where the group
+    # keeps the reference allele.
+    parent = {4: "T", 8: "A", 16: "C", 12: "G"}
+    # Two seeds, sharing the parent's other three mutations plus one private one.
+    seeds = {
+        "s0": {4: "T", 8: "A", 16: "C", 20: "A"},
+        "s1": {4: "T", 8: "A", 16: "C", 24: "T"},
+    }
+
+    def alignment(self, mutations):
+        h = list(self.reference)
+        for pos, base in mutations.items():
+            assert h[pos] != base
+            h[pos] = base
+        return jit.encode_alleles(np.array(h))
+
+    def build(self, tmp_path):
+        alignments = {"p": self.alignment(self.parent)}
+        for name, mutations in self.seeds.items():
+            alignments[name] = self.alignment(mutations)
+        ds = sc2ts.dataset.tmp_dataset(
+            tmp_path / "ds.zarr",
+            alignments,
+            date=["2020-01-01", "2020-01-02", "2020-01-02"],
+            contig_id="chr_test",
+        )
+        base_ts = si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+        base_path = tmp_path / "base.ts"
+        base_ts.dump(base_path)
+        match_db = si.MatchDb.initialise(tmp_path / "match.db")
+        for date in ["2020-01-01", "2020-01-02"]:
+            ts = si.extend(
+                dataset=ds.path,
+                base_ts=str(base_path),
+                date=date,
+                match_db=str(match_db.path),
+                min_group_size=1,
+                seed_groups=[list(self.seeds)],
+            )
+            ts.dump(base_path)
+        return ts, alignments
+
+    def test_seed_haplotypes_are_preserved(self, tmp_path):
+        ts, alignments = self.build(tmp_path)
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        # Inferring the group's tree against the reference instead would leave
+        # position 12 out of the flat tree entirely, so both seeds would silently
+        # inherit the parent's allele there.
+        for name in self.seeds:
+            u = ts.samples()[strains.index(name)]
+            nt.assert_array_equal(si.node_haplotypes(ts, [u])[0], alignments[name])
+
+    def test_group_matched_to_parent_sample(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        # The ancestor is one mutation from p and three from the reference, so
+        # the group must match p rather than the root. Assert on the match rather
+        # than the final topology, which push_up_reversions rearranges: the
+        # group's G13T is an immediate reversion of p's T13G.
+        p = ts.samples()[strains.index("p")]
+        for name in self.seeds:
+            u = ts.samples()[strains.index(name)]
+            path = ts.node(u).metadata["sc2ts"]["hmm_match"]["path"]
+            assert path[0]["parent"] == p
+
+    def test_members_share_the_ancestor_hmm_match(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        matches = []
+        for name in self.seeds:
+            u = ts.samples()[strains.index(name)]
+            hmm_match = ts.node(u).metadata["sc2ts"]["hmm_match"]
+            # Recombination is disallowed for seeds.
+            assert len(hmm_match["path"]) == 1
+            matches.append(hmm_match)
+        # The stored match is the one that placed the group, so every member
+        # reports the same thing.
+        assert matches[0] == matches[1]
 
 
 class TestSeedGroup:
@@ -615,7 +788,7 @@ class TestSeedGroup:
         samples = [si.Sample("a"), si.Sample("b")]
         group = si.SeedGroup(strains=("a", "b"), date="2021-01-01")
         group.samples = samples
-        group.topology = ([-1, 2, -1], [0, 0, 1])
+        group.flat_ts = tskit.Tree.generate_star(2, span=10).tree_sequence
         group.root = si.Sample("seed_root")
         group.root.hmm_match = si.HmmMatch([si.PathSegment(0, 10, 3)], [])
         return group
@@ -625,7 +798,7 @@ class TestSeedGroup:
         assert group.strains == ("a", "b")
         assert group.date == "2021-01-01"
         assert group.samples is None
-        assert group.topology is None
+        assert group.flat_ts is None
         assert group.root is None
         assert len(group) == 2
 
@@ -646,7 +819,7 @@ class TestSeedGroup:
         assert sample_group.samples is group.samples
         assert sample_group.path == group.path
         assert sample_group.immediate_reversions == ()
-        assert sample_group.topology is group.topology
+        assert sample_group.flat_ts is group.flat_ts
 
     def test_sample_hash_matches_sample_group(self):
         # The group ID goes into node metadata, so the two classes must agree.

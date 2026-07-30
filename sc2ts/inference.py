@@ -517,8 +517,7 @@ def prepare_samples(
 ):
     """
     Return the Sample objects for the specified strains, with their haplotypes,
-    metadata, pango, scorpio and date filled in. Strains that have no stored
-    alignment are dropped.
+    metadata, pango, scorpio and date filled in.
     """
     samples = []
     for sample in preprocess(
@@ -528,9 +527,6 @@ def prepare_samples(
         progress_title=progress_title,
         show_progress=show_progress,
     ):
-        if sample.haplotype is None:
-            logger.debug(f"No alignment stored for {sample.strain}")
-            continue
         md = dataset.metadata[sample.strain]
         sample.metadata = md
         sample.pango = md.get(PANGO_LINEAGE_KEY, "Unknown")
@@ -816,7 +812,6 @@ def _extend(
         todays_seed_groups,
         date,
         dataset=dataset,
-        num_mismatches=num_mismatches,
         deletions_as_missing=deletions_as_missing,
         show_progress=show_progress,
         num_threads=num_threads,
@@ -958,33 +953,47 @@ def match_path_ts(group, sequence_length):
     return tables.tree_sequence()
 
 
-def flat_group_ts(ts, haplotypes, ancestral_haplotype, deletions_as_missing=False):
+def flat_group_ts(
+    ts, samples, ancestral_haplotype, *, group_id=None, deletions_as_missing=False
+):
     """
-    Return a "flat" (star) tree sequence in which each of the specified
-    haplotypes is a sample node hanging off a root carrying
-    ``ancestral_haplotype``.
+    Return a "flat" (star) tree sequence in which each of the specified samples
+    is a sample node hanging off a root carrying ``ancestral_haplotype``.
 
-    Site positions and ancestral states are taken from ``ts``, and a mutation
-    is added wherever a haplotype's non-missing allele differs from
-    ``ancestral_haplotype``. Missing data therefore reads as the ancestral
-    state, exactly as it does in the trees built by ``match_path_ts``.
+    Site positions are taken from ``ts``, each site's ancestral state is the
+    ``ancestral_haplotype`` allele, and a mutation is added wherever a sample's
+    non-missing allele differs from it. Missing data therefore reads as the
+    ancestral state, exactly as it does in the trees built by ``match_path_ts``.
+
+    If ``group_id`` is given the sample nodes carry their full metadata, so
+    that the tree inferred from this one can be attached to the ARG. Otherwise
+    bare sample nodes are added, which is all that tree building needs, and is
+    the only option before the group has been matched.
     """
+    # IUPAC_ALLELES[MISSING] is "." by negative indexing, so a missing ancestral
+    # allele would quietly give the wrong ancestral state.
+    assert np.all(ancestral_haplotype != MISSING)
     tables = tskit.TableCollection(ts.sequence_length)
     tables.nodes.metadata_schema = tskit.MetadataSchema.permissive_json()
+    tables.mutations.metadata_schema = tskit.MetadataSchema.permissive_json()
     sites_position = ts.sites_position
-    sites_ancestral_state = ts.sites_ancestral_state
-    root = len(haplotypes)
+    root = len(samples)
     site_id_map = {}
-    for h in haplotypes:
-        node_id = tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)
+    for sample in samples:
+        if group_id is None:
+            node_id = tables.nodes.add_row(flags=sample.flags, time=0)
+        else:
+            node_id = add_sample_to_tables(sample, tables, group_id=group_id)
         tables.edges.add_row(0, tables.sequence_length, parent=root, child=node_id)
+        h = sample.haplotype
         if deletions_as_missing:
             h = np.where(h == DELETION, MISSING, h)
         (sites,) = np.where((h != ancestral_haplotype) & (h != MISSING))
         for site_id in sites:
             if site_id not in site_id_map:
                 site_id_map[site_id] = tables.sites.add_row(
-                    sites_position[site_id], sites_ancestral_state[site_id]
+                    sites_position[site_id],
+                    core.IUPAC_ALLELES[ancestral_haplotype[site_id]],
                 )
             tables.mutations.add_row(
                 site=site_id_map[site_id],
@@ -1088,9 +1097,10 @@ class SampleGroup:
     immediate_reversions: List = None
     sample_hash: str = None
     tree_quality_metrics: GroupTreeQualityMetrics = None
-    # Optionally, a pre-inferred (pi, tau) topology to use when building the
-    # group's local tree instead of inferring one.
-    topology: tuple = None
+    # Optionally, the "flat" (star) tree to infer the group's local tree from.
+    # Groups coming from the MatchDb leave this as None and build it from their
+    # samples' HMM matches; seed groups supply it directly.
+    flat_ts: tskit.TreeSequence = None
 
     def __post_init__(self):
         self.sample_hash = sample_group_id(self.strains)
@@ -1154,8 +1164,8 @@ class SeedGroup:
     strains: tuple
     date: str
     samples: List = None
-    topology: tuple = None
     root: Sample = None
+    flat_ts: tskit.TreeSequence = None
 
     @property
     def path(self):
@@ -1182,7 +1192,7 @@ class SeedGroup:
             samples=self.samples,
             path=self.path,
             immediate_reversions=(),
-            topology=self.topology,
+            flat_ts=self.flat_ts,
         )
 
 
@@ -1269,11 +1279,13 @@ def add_sample_groups(
                     f"threshold: {group.summary()}"
                 )
                 continue
-            flat_ts = match_path_ts(group, ts.sequence_length)
+            flat_ts = group.flat_ts
+            if flat_ts is None:
+                flat_ts = match_path_ts(group, ts.sequence_length)
             if flat_ts.num_mutations == 0 or flat_ts.num_samples == 1:
                 poly_ts = flat_ts
             else:
-                binary_ts = tree_ops.infer_binary(flat_ts, group.topology)
+                binary_ts = tree_ops.infer_binary(flat_ts)
                 poly_ts = tree_ops.trim_branches(binary_ts)
             assert poly_ts.num_samples == flat_ts.num_samples
             tqm = group.add_tree_quality_metrics(poly_ts, date)
@@ -1337,30 +1349,26 @@ def add_sample_groups(
     return ts, added_groups
 
 
-def infer_seed_group_root(ts, haplotypes, reference, deletions_as_missing=False):
+def infer_seed_group_root(ts, samples, reference, deletions_as_missing=False):
     """
-    Infer a tree over the specified group of haplotypes and return the
-    ``(topology, root_haplotype)`` of the group's inferred ancestor. The
-    topology is None when there is nothing to infer: either a single
-    haplotype, or a group identical to ``reference`` at every non-missing site.
+    Infer a tree over the specified group of samples and return the haplotype
+    of the group's inferred ancestor, in the ``core.IUPAC_ALLELES`` encoding.
     """
+    haplotypes = [sample.haplotype for sample in samples]
     flat_ts = flat_group_ts(
         ts,
-        haplotypes,
+        samples,
         reference,
         deletions_as_missing=deletions_as_missing,
     )
-    topology = None
-    if flat_ts.num_samples > 1 and flat_ts.num_mutations > 0:
-        topology = tree_ops.infer_binary_topology(flat_ts)
-
-    if topology is None:
-        if len(haplotypes) == 1:
-            root_haplotype = haplotypes[0].copy()
-        else:
-            root_haplotype = reference.copy()
+    if len(samples) == 1:
+        # There is nothing to infer over one haplotype: it is its own ancestor.
+        root_haplotype = haplotypes[0].copy()
+    elif flat_ts.num_mutations == 0:
+        # The group is identical to the reference at every non-missing site.
+        root_haplotype = reference.copy()
     else:
-        binary_ts = tree_ops.infer_binary(flat_ts, topology)
+        binary_ts = tree_ops.infer_binary(flat_ts)
         tree = binary_ts.first()
         # The single child of the outgroup root is the group's MRCA.
         mrca = tree.children(tree.root)[0]
@@ -1372,7 +1380,7 @@ def infer_seed_group_root(ts, haplotypes, reference, deletions_as_missing=False)
     # the HMM ignore them rather than asserting the reference allele.
     H = np.array(haplotypes)
     root_haplotype[np.all(H == MISSING, axis=0)] = MISSING
-    return topology, root_haplotype
+    return root_haplotype
 
 
 def add_seed_groups(
@@ -1382,7 +1390,6 @@ def add_seed_groups(
     date,
     *,
     dataset,
-    num_mismatches,
     deletions_as_missing=False,
     show_progress=False,
     num_threads=0,
@@ -1392,11 +1399,11 @@ def add_seed_groups(
     Add the specified SeedGroups into the ARG, one local tree per group.
 
     Rather than matching each seed against the ARG individually, we infer a
-    tree over each group's haplotypes, match the haplotype of the group's
-    inferred ancestor (with recombination disallowed), and then rebuild the
-    group's tree against that path so that the whole group is attached in one
-    piece. Seeds never go through the MatchDb: their matches are constructed
-    directly by forcing them down the ancestor's path.
+    tree over each group's haplotypes and match the haplotype of the group's
+    inferred ancestor, with recombination disallowed. The group's local tree is
+    then inferred again, this time against the haplotype of the node the
+    ancestor matched to, so that the whole group is attached in one piece.
+    Seeds never go through the MatchDb.
 
     Returns the updated tree sequence.
     """
@@ -1417,41 +1424,26 @@ def add_seed_groups(
     sample_map = {sample.strain: sample for sample in samples}
 
     reference = reference_haplotype(base_ts)
-    groups = []
     for group in seed_groups:
         assert group.date == date
-        # Seeds without a stored alignment are dropped from their group, and a
-        # group left with no members is skipped entirely.
-        group.samples = [
-            sample_map[strain] for strain in group.strains if strain in sample_map
-        ]
-        if len(group.samples) == 0:
-            logger.warning(
-                f"Skipping seed group with no usable samples: {list(group.strains)}"
-            )
-            continue
-        group.topology, root_haplotype = infer_seed_group_root(
-            base_ts,
-            [sample.haplotype for sample in group.samples],
-            reference,
-            deletions_as_missing=deletions_as_missing,
-        )
+        group.samples = [sample_map[strain] for strain in group.strains]
         group.root = Sample(
             strain=f"seed_root_{group.sample_hash}",
             date=date,
-            haplotype=root_haplotype,
+            haplotype=infer_seed_group_root(
+                base_ts,
+                group.samples,
+                reference,
+                deletions_as_missing=deletions_as_missing,
+            ),
         )
-        groups.append(group)
-
-    if len(groups) == 0:
-        return ts
 
     # Seed samples are usually far diverged from the current ARG, and matching
     # them with the standard num_mismatches gives spurious recombinations.
     # Match the inferred ancestors without recombination instead.
     match_samples(
         date,
-        [group.root for group in groups],
+        [group.root for group in seed_groups],
         base_ts=base_ts,
         num_mismatches=NO_RECOMBINATION_NUM_MISMATCHES,
         deletions_as_missing=deletions_as_missing,
@@ -1460,31 +1452,36 @@ def add_seed_groups(
         memory_limit=memory_limit,
     )
 
-    seed_samples = []
-    for group in groups:
-        parent_haplotype = path_haplotype(base_ts, group.path)
+    num_samples = 0
+    for group in seed_groups:
+        # Recombination is disallowed above, so the group attaches to a single
+        # node. Multiple segments would also mean characterise_recombinants is
+        # needed here, and that the group is flagged as a recombinant.
+        assert len(group.path) == 1
+        parent_haplotype = node_haplotypes(base_ts, [group.path[0].parent])[0]
         for sample in group.samples:
-            force_match(
-                sample,
-                group.path,
-                parent_haplotype,
-                base_ts.sites_position,
-                deletions_as_missing,
-                num_mismatches,
-            )
+            # The stored HMM match is informational only, so every member of
+            # the group reports the match that placed the group.
+            sample.hmm_match = group.root.hmm_match
             logger.warning(f"Unconditionally including {sample.summary()}")
-        seed_samples.extend(group.samples)
+        group.flat_ts = flat_group_ts(
+            base_ts,
+            group.samples,
+            parent_haplotype,
+            group_id=group.sample_hash,
+            deletions_as_missing=deletions_as_missing,
+        )
+        num_samples += len(group.samples)
 
-    characterise_recombinants(base_ts, seed_samples)
     ts, _ = add_sample_groups(
         ts,
-        [group.sample_group() for group in groups],
+        [group.sample_group() for group in seed_groups],
         date,
         min_group_size=1,
         show_progress=show_progress,
         phase="seed",
     )
-    logger.info(f"Added {len(seed_samples)} seed samples in {len(groups)} groups")
+    logger.info(f"Added {num_samples} seed samples in {len(seed_groups)} groups")
     return ts
 
 
@@ -2068,56 +2065,6 @@ def reference_haplotype(ts):
     ancestral state of each site, in the ``core.IUPAC_ALLELES`` encoding.
     """
     return jit.encode_alleles(np.asarray(ts.sites_ancestral_state, dtype="U1"))
-
-
-def path_haplotype(ts, path):
-    """
-    Return the haplotype copied along the specified HMM path, in the
-    ``core.IUPAC_ALLELES`` encoding.
-    """
-    H = node_haplotypes(ts, [seg.parent for seg in path])
-    h = np.zeros(ts.num_sites, dtype=np.int8)
-    for seg, parent_haplotype in zip(path, H):
-        left, right = np.searchsorted(ts.sites_position, [seg.left, seg.right])
-        h[left:right] = parent_haplotype[left:right]
-    return h
-
-
-def force_match(
-    sample,
-    path,
-    parent_haplotype,
-    sites_position,
-    deletions_as_missing,
-    num_mismatches,
-):
-    """
-    Set the sample's ``hmm_match`` to the match obtained by forcing it down the
-    specified path, with one mutation at each site where the sample's
-    non-missing haplotype differs from the haplotype copied along the path.
-    """
-    h = sample.haplotype
-    if deletions_as_missing:
-        h = np.where(h == DELETION, MISSING, h)
-    (sites,) = np.where(
-        (h != parent_haplotype) & (h != MISSING) & (parent_haplotype != MISSING)
-    )
-    mutations = [
-        MatchMutation(
-            derived_state=core.IUPAC_ALLELES[h[site_id]],
-            inherited_state=core.IUPAC_ALLELES[parent_haplotype[site_id]],
-            site_id=int(site_id),
-            site_position=int(sites_position[site_id]),
-            # A forced path has no HMM-match artefacts, so there are no
-            # reversions to mark up for tree building. Parsimony over the full
-            # haplotypes handles reversions on the group's root branch instead.
-            is_reversion=False,
-            is_immediate_reversion=False,
-        )
-        for site_id in sites
-    ]
-    sample.hmm_match = HmmMatch(list(path), mutations)
-    sample.hmm_match.compute_cost(num_mismatches)
 
 
 def characterise_recombinants(ts, samples):

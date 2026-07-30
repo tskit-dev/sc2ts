@@ -17,6 +17,10 @@ In development
   negative ("in the future") node times. The previous `include_samples` formats
   (bare strain IDs, or `(strain, match_date)` tuples) are no longer supported.
 
+  Note that the `hmm_match` metadata of a seed node records the match that placed
+  its *group*, not a per-sample match, so its mutation count is not the number of
+  mutations between that sample and its parent.
+
 - Fix retrospective matching on a day with no new samples. The table of samples
   already in the ARG was only rebuilt when there were samples to match, so on
   such a day the retrospective query ran against the previous day's table and
