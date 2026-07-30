@@ -17,6 +17,11 @@ In development
   ("in the future") node times. The previous format (bare strain IDs, or
   `(strain, match_date)` tuples) is no longer supported.
 
+- Fix retrospective matching on a day with no new samples. The table of samples
+  already in the ARG was only rebuilt when there were samples to match, so on
+  such a day the retrospective query ran against the previous day's table and
+  could add a second copy of a sample that had just been inserted.
+
 - Add basic support for non-SARS-CoV-2 genomes via an optional reference FASTA.
   Supply `--reference` to `import-alignments` and a `reference_fasta` key in the
   inference config; both default to the built-in SARS-CoV-2 reference, so

@@ -1056,7 +1056,8 @@ class TestRealData:
             min_different_dates=1,
         )
         retro_groups = ts.metadata["sc2ts"]["retro_groups"]
-        assert len(retro_groups) == 6
+        # Everything in the match DB that isn't already a sample in the base ARG.
+        assert len(retro_groups) == 4
         assert retro_groups[0] == {
             "dates": ["2020-01-29"],
             "depth": 1,
@@ -1069,6 +1070,11 @@ class TestRealData:
             "strains": ["SRR15736313"],
             "date_added": "2020-02-15",
         }
+        # 2020-02-15 has no samples of its own, so the retro query is the only
+        # thing adding samples here. It must not re-add the samples that are
+        # already in the base ARG.
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        assert len(set(strains)) == len(strains)
 
     def test_2020_02_14_allow_pango_lineages(
         self, tmp_path, fx_ts_map, fx_dataset, fx_match_db
@@ -1087,7 +1093,7 @@ class TestRealData:
             max_pango_lineages=2,
         )
         retro_groups = ts.metadata["sc2ts"]["retro_groups"]
-        assert len(retro_groups) == 6
+        assert len(retro_groups) == 4
 
     def test_2020_02_14_skip_pango_lineages(
         self,
@@ -1112,7 +1118,7 @@ class TestRealData:
                 max_pango_lineages=1,
             )
             retro_groups = ts.metadata["sc2ts"]["retro_groups"]
-            assert len(retro_groups) == 5
+            assert len(retro_groups) == 3
             assert all(len(set(g["pango_lineages"])) == 1 for g in retro_groups)
             assert "Skipping num_pango_lineages=2 exceeds threshold" in caplog.text
 
@@ -1168,7 +1174,7 @@ class TestRealData:
             retro_groups = ts.metadata["sc2ts"]["retro_groups"]
             assert len(retro_groups) == 0
             assert (
-                "Skipping mean_mutations_per_sample=1.0 exceeds threshold" in caplog.text
+                "Skipping mean_mutations_per_sample=4.0 exceeds threshold" in caplog.text
             )
 
     def test_2020_02_14_skip_root_mutations(
