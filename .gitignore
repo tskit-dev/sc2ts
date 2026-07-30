@@ -3,7 +3,13 @@
 *.tsz
 *.nwk
 *.nex
+# Generated on demand alongside a FASTA
+*.fai
 _version.py
+
+# Editor swap files
+*.swp
+*.swo
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
