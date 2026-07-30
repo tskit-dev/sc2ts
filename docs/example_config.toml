@@ -93,8 +93,8 @@ memory_limit=32
 # later dates keep their real dates, and so are given negative ("in the
 # future") node times until their real date is reached.
 #
-#   include_samples=[["BA.1_strain_a", "BA.1_strain_b"], ["BA.2_strain_c"]]
-include_samples=[]
+#   seed_groups=[["BA.1_strain_a", "BA.1_strain_b"], ["BA.2_strain_c"]]
+seed_groups=[]
 
 # Override specific parameter values over a time period.
 [[override]]

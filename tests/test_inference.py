@@ -482,7 +482,7 @@ class TestMirrorTsCoords:
         self.check_double_mirror(ts)
 
 
-class TestCheckIncludeSamples:
+class TestCheckSeedGroups:
     metadata = {
         "a": {"date": "2021-01-03"},
         "b": {"date": "2021-01-01"},
@@ -490,38 +490,38 @@ class TestCheckIncludeSamples:
     }
 
     def test_empty(self):
-        assert si.check_include_samples([], self.metadata) == []
+        assert si.check_seed_groups([], self.metadata) == []
 
     def test_groups(self):
-        result = si.check_include_samples([["a", "b"], ["c"]], self.metadata)
+        result = si.check_seed_groups([["a", "b"], ["c"]], self.metadata)
         assert result == [("a", "b"), ("c",)]
 
     def test_tuples_accepted(self):
-        assert si.check_include_samples([("a",)], self.metadata) == [("a",)]
+        assert si.check_seed_groups([("a",)], self.metadata) == [("a",)]
 
     def test_bare_string_raises(self):
         with pytest.raises(ValueError, match="must be a list of strain IDs"):
-            si.check_include_samples(["a"], self.metadata)
+            si.check_seed_groups(["a"], self.metadata)
 
     def test_empty_group_raises(self):
         with pytest.raises(ValueError, match="must not be empty"):
-            si.check_include_samples([[]], self.metadata)
+            si.check_seed_groups([[]], self.metadata)
 
     def test_non_string_strain_raises(self):
         with pytest.raises(ValueError, match="must be strings"):
-            si.check_include_samples([["a", 7]], self.metadata)
+            si.check_seed_groups([["a", 7]], self.metadata)
 
     def test_duplicate_strain_raises(self):
-        with pytest.raises(ValueError, match="more than one include_samples group"):
-            si.check_include_samples([["a", "b"], ["a"]], self.metadata)
+        with pytest.raises(ValueError, match="more than one seed group"):
+            si.check_seed_groups([["a", "b"], ["a"]], self.metadata)
 
     def test_duplicate_within_group_raises(self):
-        with pytest.raises(ValueError, match="more than one include_samples group"):
-            si.check_include_samples([["a", "a"]], self.metadata)
+        with pytest.raises(ValueError, match="more than one seed group"):
+            si.check_seed_groups([["a", "a"]], self.metadata)
 
     def test_missing_strain_raises(self):
         with pytest.raises(ValueError, match="not in dataset"):
-            si.check_include_samples([["a", "nosuchstrain"]], self.metadata)
+            si.check_seed_groups([["a", "nosuchstrain"]], self.metadata)
 
 
 class TestSeedGroupDates:
@@ -662,7 +662,7 @@ class TestRealData:
         assert "SRR11597115" not in ts.metadata["sc2ts"]["samples_strain"]
         ts.tables.assert_equals(fx_ts_map["2020-02-02"].tables, ignore_provenance=True)
 
-    def test_2020_02_02_include_samples(
+    def test_2020_02_02_seed_group(
         self,
         tmp_path,
         fx_ts_map,
@@ -673,7 +673,7 @@ class TestRealData:
             base_ts=fx_ts_map["2020-02-01"],
             date="2020-02-02",
             match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=[["SRR11597115"]],
+            seed_groups=[["SRR11597115"]],
         )
         assert ts.metadata["sc2ts"]["cumulative_stats"]["exact_matches"]["pango"] == {
             "A": 2,
@@ -703,7 +703,7 @@ class TestRealData:
             base_ts=fx_ts_map["2020-01-30"],
             date="2020-01-31",
             match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=[group],
+            seed_groups=[group],
         )
         strains = ts.metadata["sc2ts"]["samples_strain"]
         nodes = {}
@@ -732,7 +732,7 @@ class TestRealData:
             base_ts=base_ts,
             date="2020-02-09",
             match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=[group],
+            seed_groups=[group],
         )
         strains = ts.metadata["sc2ts"]["samples_strain"]
         nodes = [ts.samples()[strains.index(strain)] for strain in group]
@@ -765,7 +765,7 @@ class TestRealData:
             base_ts=fx_ts_map["2020-02-01"],
             date="2020-02-02",
             match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-            include_samples=[["SRR11597115"], ["SRR11597190"]],
+            seed_groups=[["SRR11597115"], ["SRR11597190"]],
         )
         strains = ts.metadata["sc2ts"]["samples_strain"]
         group_ids = set()
@@ -783,7 +783,7 @@ class TestRealData:
         # base_ts containing negative ("future") node times. It must also not be
         # re-added on its natural date.
         group = ["SRR11494548", "SRR11597115"]
-        include_samples = [group]
+        seed_groups = [group]
         base_path = tmp_path / "base.ts"
         fx_ts_map["2020-01-30"].dump(base_path)
         match_db = si.MatchDb.initialise(tmp_path / "match.db")
@@ -799,7 +799,7 @@ class TestRealData:
                 base_ts=base_path,
                 date=date,
                 match_db=match_db.path,
-                include_samples=include_samples,
+                seed_groups=seed_groups,
             )
             ts.dump(base_path)
             strains = ts.metadata["sc2ts"]["samples_strain"]
@@ -811,7 +811,7 @@ class TestRealData:
             assert ts.nodes_time[u] == expected
 
     @pytest.mark.parametrize(
-        "include_samples",
+        "seed_groups",
         (
             [["SRR11597115"], ["NOSUCHSTRAIN"]],
             [["SRR11597115", "NOSUCHSTRAIN"]],
@@ -819,7 +819,7 @@ class TestRealData:
         ),
     )
     def test_seed_missing_strain_raises(
-        self, tmp_path, fx_ts_map, fx_dataset, include_samples
+        self, tmp_path, fx_ts_map, fx_dataset, seed_groups
     ):
         # A seed strain that isn't in the dataset is an error, whether it's on
         # its own or grouped with a strain that does exist.
@@ -829,7 +829,7 @@ class TestRealData:
                 base_ts=fx_ts_map["2020-02-01"],
                 date="2020-02-02",
                 match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-                include_samples=include_samples,
+                seed_groups=seed_groups,
             )
 
     def test_seed_bare_string_raises(self, tmp_path, fx_ts_map, fx_dataset):
@@ -840,7 +840,7 @@ class TestRealData:
                 base_ts=fx_ts_map["2020-02-01"],
                 date="2020-02-02",
                 match_db=si.MatchDb.initialise(tmp_path / "match.db"),
-                include_samples=["SRR11597115"],
+                seed_groups=["SRR11597115"],
             )
 
     def test_2020_02_02_mutation_overlap(

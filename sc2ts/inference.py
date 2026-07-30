@@ -502,9 +502,9 @@ def preprocess(
     return samples
 
 
-def check_include_samples(include_samples, metadata):
+def check_seed_groups(seed_groups, metadata):
     """
-    Check the ``include_samples`` seed specification and return it as a list of
+    Check the ``seed_groups`` seed specification and return it as a list of
     tuples of strain IDs, one tuple per seed group.
 
     Each entry must be a non-empty list of strain IDs which are inserted into
@@ -513,13 +513,13 @@ def check_include_samples(include_samples, metadata):
     """
     groups = []
     seen = {}
-    for entry in include_samples:
+    for entry in seed_groups:
         if isinstance(entry, str) or not isinstance(entry, (list, tuple)):
             raise ValueError(
-                f"Each include_samples entry must be a list of strain IDs, not {entry!r}"
+                f"Each seed_groups entry must be a list of strain IDs, not {entry!r}"
             )
         if len(entry) == 0:
-            raise ValueError("include_samples groups must not be empty")
+            raise ValueError("Seed groups must not be empty")
         for strain in entry:
             if not isinstance(strain, str):
                 raise ValueError(f"Seed strain IDs must be strings, not {strain!r}")
@@ -527,8 +527,7 @@ def check_include_samples(include_samples, metadata):
         for strain in group:
             if strain in seen:
                 raise ValueError(
-                    f"Seed sample {strain} appears in more than one "
-                    "include_samples group"
+                    f"Seed sample {strain} appears in more than one seed group"
                 )
             seen[strain] = group
         groups.append(group)
@@ -539,7 +538,7 @@ def check_include_samples(include_samples, metadata):
     return groups
 
 
-def seed_group_dates(include_samples, metadata):
+def seed_group_dates(seed_groups, metadata):
     """
     Return a list of ``(date, strains)`` tuples, one per seed group, where
     ``date`` is the minimum date over the group's members. The whole group is
@@ -548,7 +547,7 @@ def seed_group_dates(include_samples, metadata):
     """
     return [
         (min(metadata[strain]["date"] for strain in group), group)
-        for group in include_samples
+        for group in seed_groups
     ]
 
 
@@ -559,7 +558,7 @@ def extend(
     base_ts,
     match_db,
     date_field="date",
-    include_samples=None,
+    seed_groups=None,
     num_mismatches=None,
     hmm_cost_threshold=None,
     min_group_size=None,
@@ -581,7 +580,7 @@ def extend(
     Extend the base tree sequence by one day, matching in the samples for the
     given date.
 
-    ``include_samples`` is an optional list of "seed" groups that are inserted
+    ``seed_groups`` is an optional list of "seed" groups that are inserted
     unconditionally and without recombination. Each entry is a list of strain
     IDs which are inserted together as a single local tree: a tree is inferred
     over the group's haplotypes, the haplotype of the group's inferred ancestor
@@ -619,8 +618,8 @@ def extend(
         max_missing_sites = np.inf
     if deletions_as_missing is None:
         deletions_as_missing = False
-    if include_samples is None:
-        include_samples = []
+    if seed_groups is None:
+        seed_groups = []
     base_ts = str(base_ts)
     dataset = str(dataset)
     match_db = str(match_db)
@@ -634,7 +633,7 @@ def extend(
     base_ts = tszip.load(base_ts)
     ds = _dataset.Dataset(dataset, date_field=date_field)
 
-    include_samples = check_include_samples(include_samples, ds.metadata)
+    seed_groups = check_seed_groups(seed_groups, ds.metadata)
 
     with MatchDb(match_db) as matches:
         tables = _extend(
@@ -642,7 +641,7 @@ def extend(
             base_ts=base_ts,
             date=date,
             match_db=matches,
-            include_samples=include_samples,
+            seed_groups=seed_groups,
             num_mismatches=num_mismatches,
             hmm_cost_threshold=hmm_cost_threshold,
             min_group_size=min_group_size,
@@ -672,7 +671,7 @@ def _extend(
     date,
     base_ts,
     match_db,
-    include_samples,
+    seed_groups,
     num_mismatches,
     hmm_cost_threshold,
     min_group_size,
@@ -698,7 +697,7 @@ def _extend(
 
     # A seed group is inserted on the minimum date over its members, so a seed
     # is processed on its group's date rather than on its own date.
-    group_dates = seed_group_dates(include_samples, dataset.metadata)
+    group_dates = seed_group_dates(seed_groups, dataset.metadata)
     seed_date = {
         strain: group_date for group_date, group in group_dates for strain in group
     }
