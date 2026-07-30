@@ -505,11 +505,15 @@ def preprocess(
 def check_seed_groups(seed_groups, metadata):
     """
     Check the ``seed_groups`` seed specification and return it as a list of
-    tuples of strain IDs, one tuple per seed group.
+    SeedGroup instances.
 
     Each entry must be a non-empty list of strain IDs which are inserted into
     the ARG together as a single group. Every strain must be present in
     ``metadata``, and no strain may appear in more than one group.
+
+    A group is inserted on the minimum date over its members; members with
+    later dates keep their real dates and so get negative ("in the future")
+    node times.
     """
     groups = []
     seen = {}
@@ -535,19 +539,13 @@ def check_seed_groups(seed_groups, metadata):
     missing = sorted(strain for strain in seen if strain not in metadata)
     if len(missing) > 0:
         raise ValueError(f"Seed samples not in dataset: {missing}")
-    return groups
 
-
-def seed_group_dates(seed_groups, metadata):
-    """
-    Return a list of ``(date, strains)`` tuples, one per seed group, where
-    ``date`` is the minimum date over the group's members. The whole group is
-    inserted into the ARG on that date; members with later dates keep their
-    real dates and so get negative ("in the future") node times.
-    """
     return [
-        (min(metadata[strain]["date"] for strain in group), group)
-        for group in seed_groups
+        SeedGroup(
+            strains=strains,
+            date=min(metadata[strain]["date"] for strain in strains),
+        )
+        for strains in groups
     ]
 
 
@@ -697,12 +695,9 @@ def _extend(
 
     # A seed group is inserted on the minimum date over its members, so a seed
     # is processed on its group's date rather than on its own date.
-    group_dates = seed_group_dates(seed_groups, dataset.metadata)
-    seed_date = {
-        strain: group_date for group_date, group in group_dates for strain in group
-    }
-    todays_groups = [group for group_date, group in group_dates if group_date == date]
-    todays_seeds = {strain for group in todays_groups for strain in group}
+    seed_date = {strain: group.date for group in seed_groups for strain in group.strains}
+    todays_groups = [group for group in seed_groups if group.date == date]
+    todays_seeds = {strain for group in todays_groups for strain in group.strains}
 
     metadata_matches = {
         strain: dataset.metadata[strain]
@@ -762,9 +757,11 @@ def _extend(
     # group left with no members is skipped entirely.
     todays_seed_groups = []
     for group in todays_groups:
-        group_samples = [seeds[strain] for strain in group if strain in seeds]
+        group_samples = [seeds[strain] for strain in group.strains if strain in seeds]
         if len(group_samples) == 0:
-            logger.warning(f"Skipping seed group with no usable samples: {list(group)}")
+            logger.warning(
+                f"Skipping seed group with no usable samples: {list(group.strains)}"
+            )
         else:
             todays_seed_groups.append(group_samples)
 
@@ -1068,6 +1065,16 @@ class GroupTreeQualityMetrics:
         )
 
 
+def sample_group_id(strains):
+    """
+    Return the ID of the group consisting of the specified strains.
+    """
+    m = hashlib.md5()
+    for strain in sorted(strains):
+        m.update(str(strain).encode())
+    return m.hexdigest()
+
+
 @dataclasses.dataclass
 class SampleGroup:
     """
@@ -1086,10 +1093,7 @@ class SampleGroup:
     topology: tuple = None
 
     def __post_init__(self):
-        m = hashlib.md5()
-        for strain in sorted(self.strains):
-            m.update(strain.encode())
-        self.sample_hash = m.hexdigest()
+        self.sample_hash = sample_group_id(self.strains)
 
     @property
     def strains(self):
@@ -1134,6 +1138,52 @@ class SampleGroup:
             date_added=date,
         )
         return self.tree_quality_metrics
+
+
+@dataclasses.dataclass
+class SeedGroup:
+    """
+    A group of "seed" samples that are inserted into the ARG unconditionally,
+    and together, as a single local tree.
+
+    The ``strains`` in the group and the ``date`` it is inserted on are its
+    specification, as returned by check_seed_groups. The remaining fields are
+    the working state for that day, and are filled in by add_seed_groups.
+    """
+
+    strains: tuple
+    date: str
+    samples: List = None
+    topology: tuple = None
+    root: Sample = None
+
+    @property
+    def path(self):
+        """
+        The path that the group's inferred ancestor was matched to.
+        """
+        return tuple(self.root.hmm_match.path)
+
+    @property
+    def sample_hash(self):
+        return sample_group_id(s.strain for s in self.samples)
+
+    def __len__(self):
+        return len(self.strains)
+
+    def summary(self):
+        return f"{self.date} n={len(self.strains)} strains={list(self.strains)}"
+
+    def sample_group(self):
+        """
+        Return the SampleGroup used to insert this group into the ARG.
+        """
+        return SampleGroup(
+            samples=self.samples,
+            path=self.path,
+            immediate_reversions=(),
+            topology=self.topology,
+        )
 
 
 def add_matching_results(where_clause, match_db, ts, date, **kwargs):

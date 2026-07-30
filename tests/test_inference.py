@@ -494,10 +494,26 @@ class TestCheckSeedGroups:
 
     def test_groups(self):
         result = si.check_seed_groups([["a", "b"], ["c"]], self.metadata)
-        assert result == [("a", "b"), ("c",)]
+        assert [g.strains for g in result] == [("a", "b"), ("c",)]
 
     def test_tuples_accepted(self):
-        assert si.check_seed_groups([("a",)], self.metadata) == [("a",)]
+        result = si.check_seed_groups([("a",)], self.metadata)
+        assert [g.strains for g in result] == [("a",)]
+
+    def test_group_gets_minimum_date(self):
+        result = si.check_seed_groups([["a", "b"]], self.metadata)
+        assert result[0].date == "2021-01-01"
+
+    def test_singleton_gets_own_date(self):
+        result = si.check_seed_groups([["a"]], self.metadata)
+        assert result[0].date == "2021-01-03"
+
+    def test_multiple_groups(self):
+        result = si.check_seed_groups([["a"], ["b", "c"]], self.metadata)
+        assert [(g.strains, g.date) for g in result] == [
+            (("a",), "2021-01-03"),
+            (("b", "c"), "2021-01-01"),
+        ]
 
     def test_bare_string_raises(self):
         with pytest.raises(ValueError, match="must be a list of strain IDs"):
@@ -524,24 +540,52 @@ class TestCheckSeedGroups:
             si.check_seed_groups([["a", "nosuchstrain"]], self.metadata)
 
 
-class TestSeedGroupDates:
-    metadata = {
-        "a": {"date": "2021-01-03"},
-        "b": {"date": "2021-01-01"},
-        "c": {"date": "2021-01-02"},
-    }
+class TestSeedGroup:
+    def example(self):
+        samples = [si.Sample("a"), si.Sample("b")]
+        group = si.SeedGroup(strains=("a", "b"), date="2021-01-01")
+        group.samples = samples
+        group.topology = ([-1, 2, -1], [0, 0, 1])
+        group.root = si.Sample("seed_root")
+        group.root.hmm_match = si.HmmMatch([si.PathSegment(0, 10, 3)], [])
+        return group
 
-    def test_group_gets_minimum_date(self):
-        result = si.seed_group_dates([("a", "b")], self.metadata)
-        assert result == [("2021-01-01", ("a", "b"))]
+    def test_specification_only(self):
+        group = si.SeedGroup(strains=("a", "b"), date="2021-01-01")
+        assert group.strains == ("a", "b")
+        assert group.date == "2021-01-01"
+        assert group.samples is None
+        assert group.topology is None
+        assert group.root is None
+        assert len(group) == 2
 
-    def test_singleton_gets_own_date(self):
-        result = si.seed_group_dates([("a",)], self.metadata)
-        assert result == [("2021-01-03", ("a",))]
+    def test_summary(self):
+        group = si.SeedGroup(strains=("a", "b"), date="2021-01-01")
+        summary = group.summary()
+        assert "2021-01-01" in summary
+        assert "a" in summary
+        assert "b" in summary
 
-    def test_multiple_groups(self):
-        result = si.seed_group_dates([("a",), ("b", "c")], self.metadata)
-        assert result == [("2021-01-03", ("a",)), ("2021-01-01", ("b", "c"))]
+    def test_path_from_root_match(self):
+        group = self.example()
+        assert group.path == (si.PathSegment(0, 10, 3),)
+
+    def test_sample_group(self):
+        group = self.example()
+        sample_group = group.sample_group()
+        assert sample_group.samples is group.samples
+        assert sample_group.path == group.path
+        assert sample_group.immediate_reversions == ()
+        assert sample_group.topology is group.topology
+
+    def test_sample_hash_matches_sample_group(self):
+        # The group ID goes into node metadata, so the two classes must agree.
+        group = self.example()
+        assert group.sample_hash == si.sample_group_id(["a", "b"])
+        assert group.sample_hash == group.sample_group().sample_hash
+
+    def test_sample_hash_independent_of_order(self):
+        assert si.sample_group_id(["a", "b"]) == si.sample_group_id(["b", "a"])
 
 
 class TestRealData:
