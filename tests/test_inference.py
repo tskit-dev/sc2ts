@@ -540,6 +540,76 @@ class TestCheckSeedGroups:
             si.check_seed_groups([["a", "nosuchstrain"]], self.metadata)
 
 
+class TestInferSeedGroupRoot:
+    # A 30bp reference, so that a group's inferred ancestor can be checked
+    # against known haplotypes without running the full pipeline.
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT"
+
+    @property
+    def base_ts(self):
+        return si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+
+    def haplotype(self, mutations=None):
+        h = list(self.reference)
+        for pos, base in (mutations or {}).items():
+            h[pos] = base
+        return jit.encode_alleles(np.array(h))
+
+    def infer(self, haplotypes):
+        ts = self.base_ts
+        return si.infer_seed_group_root(ts, haplotypes, si.reference_haplotype(ts))
+
+    def test_single_haplotype(self):
+        h = self.haplotype({4: "T"})
+        topology, root = self.infer([h])
+        # Nothing to infer over one sample: the ancestor is the sample.
+        assert topology is None
+        nt.assert_array_equal(root, h)
+        assert root is not h
+
+    def test_identical_to_reference(self):
+        reference = si.reference_haplotype(self.base_ts)
+        topology, root = self.infer([self.haplotype(), self.haplotype()])
+        # No mutations, so there is no tree to infer and the ancestor is the
+        # reference.
+        assert topology is None
+        nt.assert_array_equal(root, reference)
+
+    def test_shared_derived_allele(self):
+        reference = si.reference_haplotype(self.base_ts)
+        haplotypes = [
+            self.haplotype({4: "T", 12: "A"}),
+            self.haplotype({4: "T", 21: "A"}),
+        ]
+        topology, root = self.infer(haplotypes)
+        assert topology is not None
+        # The ancestor carries the shared mutation but neither private one.
+        expected = reference.copy()
+        expected[4] = jit.encode_alleles(np.array(["T"]))[0]
+        nt.assert_array_equal(root, expected)
+
+    def test_all_missing_site_is_missing(self):
+        haplotypes = []
+        for pos in [12, 21]:
+            h = self.haplotype({pos: "A"})
+            h[4] = si.MISSING
+            haplotypes.append(h)
+        _, root = self.infer(haplotypes)
+        # Every member is missing at site 4, so the ancestor is unknown there
+        # rather than asserting the reference allele.
+        assert root[4] == si.MISSING
+
+    def test_partially_missing_site_is_not_missing(self):
+        haplotypes = [self.haplotype({4: "T"}), self.haplotype()]
+        haplotypes[1][4] = si.MISSING
+        _, root = self.infer(haplotypes)
+        assert root[4] != si.MISSING
+
+
 class TestSeedGroup:
     def example(self):
         samples = [si.Sample("a"), si.Sample("b")]

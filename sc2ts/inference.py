@@ -1089,8 +1089,7 @@ class SampleGroup:
     sample_hash: str = None
     tree_quality_metrics: GroupTreeQualityMetrics = None
     # Optionally, a pre-inferred (pi, tau) topology to use when building the
-    # group's local tree instead of inferring one. Must be trailing, because
-    # add_matching_results constructs SampleGroups positionally.
+    # group's local tree instead of inferring one.
     topology: tuple = None
 
     def __post_init__(self):
@@ -1218,9 +1217,9 @@ def add_matching_results(where_clause, match_db, ts, date, **kwargs):
 
     groups = [
         SampleGroup(
-            samples,
-            key[0],
-            key[1],
+            samples=samples,
+            path=key[0],
+            immediate_reversions=key[1],
         )
         for key, samples in grouped_matches.items()
     ]
