@@ -618,12 +618,12 @@ def extend(
     given date.
 
     ``seed_groups`` is an optional list of "seed" groups that are inserted
-    unconditionally and without recombination. Each entry is a list of strain
-    IDs which are inserted together as a single local tree: a tree is inferred
-    over the group's haplotypes, the haplotype of the group's inferred ancestor
-    is matched against the ARG, and the whole group is then attached at that
-    single placement. This places major saltations far better than matching
-    each seed individually, since the inferred ancestor is much closer to the
+    unconditionally. Each entry is a list of strain IDs which are inserted
+    together as a single local tree: a tree is inferred over the group's
+    haplotypes, the haplotype of the group's inferred ancestor is matched
+    against the ARG, and the whole group is then attached at that single
+    placement. This places major saltations far better than matching each seed
+    individually, since the inferred ancestor is much closer to the
     contemporaneous ARG than any of the group's leaves.
 
     A group is inserted on the *minimum* date over its members. Members with
@@ -812,6 +812,7 @@ def _extend(
         todays_seed_groups,
         date,
         dataset=dataset,
+        num_mismatches=num_mismatches,
         deletions_as_missing=deletions_as_missing,
         show_progress=show_progress,
         num_threads=num_threads,
@@ -1390,6 +1391,7 @@ def add_seed_groups(
     date,
     *,
     dataset,
+    num_mismatches,
     deletions_as_missing=False,
     show_progress=False,
     num_threads=0,
@@ -1400,10 +1402,9 @@ def add_seed_groups(
 
     Rather than matching each seed against the ARG individually, we infer a
     tree over each group's haplotypes and match the haplotype of the group's
-    inferred ancestor, with recombination disallowed. The group's local tree is
-    then inferred again, this time against the haplotype of the node the
-    ancestor matched to, so that the whole group is attached in one piece.
-    Seeds never go through the MatchDb.
+    inferred ancestor. The group's local tree is then inferred again, this time
+    against the haplotype the ancestor matched to, so that the whole group is
+    attached in one piece. Seeds never go through the MatchDb.
 
     Returns the updated tree sequence.
     """
@@ -1438,31 +1439,29 @@ def add_seed_groups(
             ),
         )
 
-    # Seed samples are usually far diverged from the current ARG, and matching
-    # them with the standard num_mismatches gives spurious recombinations.
-    # Match the inferred ancestors without recombination instead.
+    roots = [group.root for group in seed_groups]
     match_samples(
         date,
-        [group.root for group in seed_groups],
+        roots,
         base_ts=base_ts,
-        num_mismatches=NO_RECOMBINATION_NUM_MISMATCHES,
+        num_mismatches=num_mismatches,
         deletions_as_missing=deletions_as_missing,
         show_progress=show_progress,
         num_threads=num_threads,
         memory_limit=memory_limit,
     )
+    characterise_recombinants(base_ts, roots)
 
     num_samples = 0
     for group in seed_groups:
-        # Recombination is disallowed above, so the group attaches to a single
-        # node. Multiple segments would also mean characterise_recombinants is
-        # needed here, and that the group is flagged as a recombinant.
-        assert len(group.path) == 1
-        parent_haplotype = node_haplotypes(base_ts, [group.path[0].parent])[0]
+        # A group whose ancestor matched a recombinant path attaches across the
+        # whole path, and attach_tree flags its root node as a recombinant.
+        parent_haplotype = path_haplotype(base_ts, group.path)
         for sample in group.samples:
             # The stored HMM match is informational only, so every member of
             # the group reports the match that placed the group.
             sample.hmm_match = group.root.hmm_match
+            sample.breakpoint_intervals = group.root.breakpoint_intervals
             logger.warning(f"Unconditionally including {sample.summary()}")
         group.flat_ts = flat_group_ts(
             base_ts,
@@ -2057,6 +2056,25 @@ def node_haplotypes(ts, nodes):
         isolated_as_missing=False,
     ).T
     return [H[unique_nodes.index(node_id)] for node_id in nodes]
+
+
+def path_haplotype(ts, path):
+    """
+    Return the haplotype matched by the specified HMM path, i.e. the alleles of
+    each segment's parent over that segment's interval, using the integer
+    allele encoding defined by ``core.IUPAC_ALLELES``.
+
+    For a single-segment path this is just the parent node's haplotype.
+    """
+    position = ts.sites_position
+    haplotypes = node_haplotypes(ts, [seg.parent for seg in path])
+    # Filling with MISSING means that a path failing to cover every site shows
+    # up downstream rather than quietly reading as the first allele.
+    haplotype = np.full(ts.num_sites, MISSING, dtype=haplotypes[0].dtype)
+    for seg, h in zip(path, haplotypes):
+        index = np.logical_and(position >= seg.left, position < seg.right)
+        haplotype[index] = h[index]
+    return haplotype
 
 
 def reference_haplotype(ts):

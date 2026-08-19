@@ -775,12 +775,157 @@ class TestSeedGroupAttachment:
         for name in self.seeds:
             u = ts.samples()[strains.index(name)]
             hmm_match = ts.node(u).metadata["sc2ts"]["hmm_match"]
-            # Recombination is disallowed for seeds.
+            # The ancestor is a clean match to p, so no recombination here.
             assert len(hmm_match["path"]) == 1
             matches.append(hmm_match)
         # The stored match is the one that placed the group, so every member
         # reports the same thing.
         assert matches[0] == matches[1]
+
+
+class TestSeedGroupRecombinantAttachment:
+    """
+    A seed group whose inferred ancestor matches a recombinant path is attached
+    across the whole path, and its local tree is inferred against the mosaic of
+    the parents rather than either one of them.
+    """
+
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT"
+    # Two day-one samples, differing from each other only at the two ends.
+    left_parent = {2: "T", 5: "A", 6: "A"}
+    right_parent = {22: "A", 26: "T", 27: "A"}
+    # The seeds take the left parent's alleles on the left and the right
+    # parent's on the right, plus one private mutation each. Their inferred
+    # ancestor is thus three mutations from either parent on its own, but a
+    # clean two-segment match: at num_mismatches=2 recombination wins.
+    ancestor = {**left_parent, **right_parent}
+    seeds = {
+        "s0": {**ancestor, 10: "A"},
+        "s1": {**ancestor, 14: "A"},
+    }
+
+    def alignment(self, mutations):
+        h = list(self.reference)
+        for pos, base in mutations.items():
+            assert h[pos] != base
+            h[pos] = base
+        return jit.encode_alleles(np.array(h))
+
+    def build(self, tmp_path):
+        alignments = {
+            "pL": self.alignment(self.left_parent),
+            "pR": self.alignment(self.right_parent),
+        }
+        for name, mutations in self.seeds.items():
+            alignments[name] = self.alignment(mutations)
+        ds = sc2ts.dataset.tmp_dataset(
+            tmp_path / "ds.zarr",
+            alignments,
+            date=["2020-01-01", "2020-01-01", "2020-01-02", "2020-01-02"],
+            contig_id="chr_test",
+        )
+        base_ts = si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+        base_path = tmp_path / "base.ts"
+        base_ts.dump(base_path)
+        match_db = si.MatchDb.initialise(tmp_path / "match.db")
+        for date in ["2020-01-01", "2020-01-02"]:
+            ts = si.extend(
+                dataset=ds.path,
+                base_ts=str(base_path),
+                date=date,
+                match_db=str(match_db.path),
+                min_group_size=1,
+                num_mismatches=2,
+                seed_groups=[list(self.seeds)],
+            )
+            ts.dump(base_path)
+        return ts, alignments
+
+    def nodes(self, ts):
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        return {
+            name: ts.samples()[strains.index(name)] for name in ["pL", "pR", *self.seeds]
+        }
+
+    def test_group_matched_to_recombinant_path(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        nodes = self.nodes(ts)
+        matches = []
+        for name in self.seeds:
+            hmm_match = ts.node(nodes[name]).metadata["sc2ts"]["hmm_match"]
+            path = hmm_match["path"]
+            assert len(path) == 2
+            assert path[0]["parent"] == nodes["pL"]
+            assert path[1]["parent"] == nodes["pR"]
+            # The whole path is covered, and the breakpoint falls between the
+            # parents' two blocks of differences.
+            assert path[0]["left"] == 0
+            assert path[1]["right"] == ts.sequence_length
+            assert path[0]["right"] == path[1]["left"]
+            assert 7 < path[0]["right"] <= 23
+            matches.append(hmm_match)
+        # Every member reports the match that placed the group.
+        assert matches[0] == matches[1]
+
+    def test_breakpoint_intervals_recorded(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        nodes = self.nodes(ts)
+        for name in self.seeds:
+            md = ts.node(nodes[name]).metadata["sc2ts"]
+            # The members share the ancestor's match, so they share its
+            # characterisation too. Without it this key would be missing, or
+            # present but empty.
+            (interval,) = md["breakpoint_intervals"]
+            # Site 6 is the last site where pL is derived and site 22 the first
+            # where pR is; sites are at 1-based positions.
+            assert interval == [8, 23]
+
+    def test_group_root_is_flagged_recombinant(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        nodes = self.nodes(ts)
+        tree = ts.first()
+        parents = {tree.parent(nodes[name]) for name in self.seeds}
+        assert len(parents) == 1
+        root = parents.pop()
+        assert root not in nodes.values()
+        assert ts.nodes_flags[root] & sc2ts.NODE_IS_RECOMBINANT > 0
+        # The group hangs off both parents, one segment each.
+        edges = sorted((e for e in ts.edges() if e.child == root), key=lambda e: e.left)
+        assert len(edges) == 2
+        assert edges[0].parent == nodes["pL"]
+        assert edges[1].parent == nodes["pR"]
+        assert edges[0].left == 0
+        assert edges[0].right == edges[1].left
+        assert edges[1].right == ts.sequence_length
+
+    def test_seed_haplotypes_are_preserved(self, tmp_path):
+        ts, alignments = self.build(tmp_path)
+        nodes = self.nodes(ts)
+        for name in self.seeds:
+            nt.assert_array_equal(
+                si.node_haplotypes(ts, [nodes[name]])[0], alignments[name]
+            )
+
+    def test_group_carries_only_its_private_mutations(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        nodes = self.nodes(ts)
+        tree = ts.first()
+        group_nodes = {nodes[name] for name in self.seeds}
+        group_nodes.add(tree.parent(nodes["s0"]))
+        # Inferring the group's tree against either parent alone would leave the
+        # other parent's three alleles out of the mosaic, and the group would
+        # re-derive them below the recombination point. Only the two private
+        # mutations belong here; sites are at 1-based positions.
+        positions = sorted(
+            ts.site(mut.site).position
+            for mut in ts.mutations()
+            if mut.node in group_nodes
+        )
+        assert positions == [11, 15]
 
 
 class TestSeedGroup:
@@ -972,8 +1117,8 @@ class TestRealData:
         u = ts.samples()[ts.metadata["sc2ts"]["samples_strain"].index("SRR11597115")]
         assert ts.nodes_flags[u] & tskit.NODE_IS_SAMPLE > 0
         assert ts.nodes_flags[u] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
-        # Seed samples are matched without recombination, so the node must
-        # have a single parent edge spanning the full sequence.
+        # The group's ancestor matches a single node here, so the seed hangs
+        # off one parent edge spanning the full sequence.
         assert ts.nodes_flags[u] & sc2ts.NODE_IS_RECOMBINANT == 0
         edges = [e for e in ts.edges() if e.child == u]
         assert len(edges) == 1

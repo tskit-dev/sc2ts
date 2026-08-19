@@ -86,8 +86,8 @@ memory_limit=32
 # major saltation events). Each entry is a list of sample IDs that are
 # inserted into the ARG together as a single local tree: a tree is inferred
 # over the group's haplotypes, the haplotype of the group's inferred ancestor
-# is matched against the ARG without recombination, and the whole group is
-# attached at that single placement.
+# is matched against the ARG, and the whole group is attached at that
+# placement.
 #
 # A group is inserted on the *minimum* date over its members. Members with
 # later dates keep their real dates, and so are given negative ("in the
