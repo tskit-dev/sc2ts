@@ -1017,6 +1017,27 @@ def flat_group_ts(
     return tables.tree_sequence()
 
 
+def group_missing_mask(ts, samples, flat_ts, deletions_as_missing=False):
+    """
+    Return the boolean array of shape ``(len(samples), flat_ts.num_sites)``
+    that is True where a group member's allele is missing.
+
+    ``flat_group_ts`` records a missing allele as the absence of a mutation, so
+    it reads as the ancestral state. Passing this mask to
+    ``tree_ops.infer_binary`` lets parsimony treat those alleles as unknown
+    instead, so that a missing site is imputed from the member's position in
+    the group's own tree rather than from the haplotype the group matched to.
+    """
+    H = np.zeros((len(samples), ts.num_sites), dtype=np.int8)
+    for j, sample in enumerate(samples):
+        H[j] = sample.haplotype
+    if deletions_as_missing:
+        H = np.where(H == DELETION, MISSING, H)
+    # The flat ts contains a subset of the sites, in the same (position) order.
+    index = np.searchsorted(ts.sites_position, flat_ts.sites_position)
+    return H[:, index] == MISSING
+
+
 def add_exact_matches(match_db, ts, date):
     where_clause = f"match_date=='{date}' AND hmm_cost==0"
     logger.info(f"Querying match DB WHERE: {where_clause}")
@@ -1109,8 +1130,10 @@ class SampleGroup:
     tree_quality_metrics: GroupTreeQualityMetrics = None
     # Optionally, the "flat" (star) tree to infer the group's local tree from.
     # Groups coming from the MatchDb leave this as None and build it from their
-    # samples' HMM matches; seed groups supply it directly.
+    # samples' HMM matches; seed groups supply it directly, along with the mask
+    # of the alleles in it that are missing rather than observed.
     flat_ts: tskit.TreeSequence = None
+    flat_missing: np.ndarray = None
 
     def __post_init__(self):
         self.sample_hash = sample_group_id(self.strains)
@@ -1176,6 +1199,7 @@ class SeedGroup:
     samples: List = None
     root: Sample = None
     flat_ts: tskit.TreeSequence = None
+    flat_missing: np.ndarray = None
 
     @property
     def path(self):
@@ -1203,6 +1227,7 @@ class SeedGroup:
             path=self.path,
             immediate_reversions=(),
             flat_ts=self.flat_ts,
+            flat_missing=self.flat_missing,
         )
 
 
@@ -1295,7 +1320,7 @@ def add_sample_groups(
             if flat_ts.num_mutations == 0 or flat_ts.num_samples == 1:
                 poly_ts = flat_ts
             else:
-                binary_ts = tree_ops.infer_binary(flat_ts)
+                binary_ts = tree_ops.infer_binary(flat_ts, group.flat_missing)
                 poly_ts = tree_ops.trim_branches(binary_ts)
             assert poly_ts.num_samples == flat_ts.num_samples
             tqm = group.add_tree_quality_metrics(poly_ts, date)
@@ -1378,7 +1403,10 @@ def infer_seed_group_root(ts, samples, reference, deletions_as_missing=False):
         # The group is identical to the reference at every non-missing site.
         root_haplotype = reference.copy()
     else:
-        binary_ts = tree_ops.infer_binary(flat_ts)
+        missing = group_missing_mask(
+            ts, samples, flat_ts, deletions_as_missing=deletions_as_missing
+        )
+        binary_ts = tree_ops.infer_binary(flat_ts, missing)
         tree = binary_ts.first()
         # The single child of the outgroup root is the group's MRCA.
         mrca = tree.children(tree.root)[0]
@@ -1477,6 +1505,12 @@ def add_seed_groups(
             group.samples,
             parent_haplotype,
             group_id=group.sample_hash,
+            deletions_as_missing=deletions_as_missing,
+        )
+        group.flat_missing = group_missing_mask(
+            base_ts,
+            group.samples,
+            group.flat_ts,
             deletions_as_missing=deletions_as_missing,
         )
         num_samples += len(group.samples)

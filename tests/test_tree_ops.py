@@ -754,6 +754,62 @@ class TestInferBinary:
         assert_variants_equal(ts1, ts2, allele_shuffle=True)
         self.check_properties(ts2)
 
+    def missing_example(self):
+        """
+        Return the flat ts for two pairs of samples over five sites. Samples 0
+        and 1 share the derived allele at sites 0 and 1, samples 2 and 3 share
+        it at sites 2 and 3, so the pairs are unambiguous. Only sample 0 is
+        derived at site 4, where sample 1 is the one we mark as missing.
+        """
+        L = 6
+        tables = tskit.TableCollection(L)
+        root = 4
+        for _ in range(4):
+            u = tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)
+            tables.edges.add_row(0, L, root, u)
+        tables.nodes.add_row(time=1)
+        derived = {0: [0, 1], 1: [0, 1], 2: [2, 3], 3: [2, 3], 4: [0]}
+        for site, nodes in derived.items():
+            tables.sites.add_row(site, "A")
+            for node in nodes:
+                tables.mutations.add_row(site, derived_state="T", node=node)
+        tables.sort()
+        return tables.tree_sequence()
+
+    def test_missing_imputed_from_the_tree(self):
+        ts1 = self.missing_example()
+        missing = np.zeros((4, 5), dtype=bool)
+        # Sample 1 did not observe site 4, where its pair partner is derived.
+        missing[1, 4] = True
+
+        # Without the mask, sample 1's allele at site 4 reads as ancestral and
+        # parsimony has to reproduce it, so the mutation is pinned onto sample
+        # 0's own branch and sample 1 keeps the ancestral allele.
+        before = tree_ops.infer_binary(ts1)
+        (mutation,) = [m for m in before.mutations() if m.site == 4]
+        assert mutation.node == 0
+        assert [v.genotypes[1] for v in before.variants()][4] == 0
+
+        # With it, the mutation moves up onto the branch the pair shares and
+        # sample 1 inherits the allele it never observed.
+        after = tree_ops.infer_binary(ts1, missing)
+        assert after.num_mutations == before.num_mutations
+        tree = after.first()
+        mrca = tree.parent(0)
+        assert tree.parent(1) == mrca
+        (mutation,) = [m for m in after.mutations() if m.site == 4]
+        assert mutation.node == mrca
+        assert [v.genotypes[1] for v in after.variants()][4] == 1
+
+    def test_all_missing_at_a_site_rejected(self):
+        # map_mutations needs at least one observation. Every site in a flat
+        # group ts has one by construction, so this just pins the behaviour.
+        ts1 = self.missing_example()
+        missing = np.zeros((4, 5), dtype=bool)
+        missing[:, 4] = True
+        with pytest.raises(tskit.LibraryError, match="non-missing"):
+            tree_ops.infer_binary(ts1, missing)
+
     @pytest.mark.parametrize("n", [2, 10])
     @pytest.mark.parametrize("num_mutations", [1, 2, 10])
     def test_simulation_root_mutations(self, n, num_mutations):

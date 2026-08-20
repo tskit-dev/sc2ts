@@ -610,11 +610,25 @@ class TestInferSeedGroupRoot:
         # rather than asserting the reference allele.
         assert root[4] == si.MISSING
 
-    def test_partially_missing_site_is_not_missing(self):
+    def test_partially_missing_site_takes_the_observed_allele(self):
         haplotypes = [self.haplotype({4: "T"}), self.haplotype()]
         haplotypes[1][4] = si.MISSING
         root = self.infer(haplotypes)
+        # The one member that observed site 4 is derived there, and the other
+        # tells us nothing, so the ancestor keeps the derived allele rather
+        # than falling back to the reference.
         assert root[4] != si.MISSING
+        assert core.IUPAC_ALLELES[root[4]] == "T"
+
+    def test_partially_missing_site_with_two_observations(self):
+        # Two members observed the reference allele and one is missing, so the
+        # ancestor is the reference here and the missing member is not what
+        # decides it.
+        haplotypes = [self.haplotype({12: "A"}), self.haplotype({21: "A"})]
+        haplotypes.append(self.haplotype())
+        haplotypes[2][4] = si.MISSING
+        root = self.infer(haplotypes)
+        assert core.IUPAC_ALLELES[root[4]] == self.reference[4]
 
 
 class TestFlatGroupTs:
@@ -697,6 +711,91 @@ class TestFlatGroupTs:
         ancestral[4] = si.MISSING
         with pytest.raises(AssertionError):
             si.flat_group_ts(ts, [self.sample("a")], ancestral)
+
+
+class TestGroupMissingMask:
+    """
+    The mask is indexed by the *flat* tree's sites, which are a subset of the
+    ARG's, so its columns line up with what infer_binary iterates over.
+    """
+
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT"
+
+    @property
+    def base_ts(self):
+        return si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+
+    def haplotype(self, mutations=None):
+        h = list(self.reference)
+        for pos, base in (mutations or {}).items():
+            h[pos] = base
+        return jit.encode_alleles(np.array(h))
+
+    def sample(self, strain, mutations=None, missing=()):
+        sample = si.Sample(strain, date="2020-01-01", metadata={"date": "2020-01-01"})
+        sample.haplotype = self.haplotype(mutations)
+        for pos in missing:
+            sample.haplotype[pos] = si.MISSING
+        sample.alignment_composition = {}
+        sample.hmm_match = si.HmmMatch([si.PathSegment(0, 31, 1)], [])
+        return sample
+
+    def mask(self, samples, **kwargs):
+        ts = self.base_ts
+        reference = si.reference_haplotype(ts)
+        flat_ts = si.flat_group_ts(ts, samples, reference, **kwargs)
+        return si.group_missing_mask(ts, samples, flat_ts, **kwargs), flat_ts
+
+    def test_shape(self):
+        samples = [self.sample("a", {4: "T"}), self.sample("b", {8: "A"})]
+        missing, flat_ts = self.mask(samples)
+        assert missing.shape == (2, flat_ts.num_sites)
+        assert missing.dtype == bool
+
+    def test_no_missing_data(self):
+        samples = [self.sample("a", {4: "T"}), self.sample("b", {8: "A"})]
+        missing, _ = self.mask(samples)
+        assert not np.any(missing)
+
+    def test_columns_follow_flat_ts_sites(self):
+        # "b" is missing at 8, where "a" is derived, so site 8 is in the flat ts
+        # and must be marked missing for b and not for a. Site 4 is in the flat
+        # ts too, so the mask has to be indexed by flat site rather than by
+        # position in the ARG.
+        samples = [
+            self.sample("a", {4: "T", 8: "A"}),
+            self.sample("b", missing=[8]),
+        ]
+        missing, flat_ts = self.mask(samples)
+        nt.assert_array_equal(flat_ts.sites_position, [5, 9])
+        nt.assert_array_equal(missing, [[False, False], [False, True]])
+
+    def test_site_dropped_when_only_missing_member_differs(self):
+        # Nothing observed differs from the reference, so there is no site in
+        # the flat ts at all and the mask has no column for it.
+        samples = [self.sample("a", missing=[4]), self.sample("b", {8: "A"})]
+        missing, flat_ts = self.mask(samples)
+        nt.assert_array_equal(flat_ts.sites_position, [9])
+        nt.assert_array_equal(missing, [[False], [False]])
+
+    def test_deletions_as_missing(self):
+        samples = [self.sample("a", {4: "-"}), self.sample("b", {4: "T"})]
+        missing, _ = self.mask(samples)
+        # A deletion is a real allele by default.
+        nt.assert_array_equal(missing, [[False], [False]])
+        missing, _ = self.mask(samples, deletions_as_missing=True)
+        nt.assert_array_equal(missing, [[True], [False]])
+
+    def test_empty_samples(self):
+        ts = self.base_ts
+        reference = si.reference_haplotype(ts)
+        flat_ts = si.flat_group_ts(ts, [], reference)
+        missing = si.group_missing_mask(ts, [], flat_ts)
+        assert missing.shape == (0, 0)
 
 
 class TestPathHaplotype:
@@ -1241,6 +1340,336 @@ class TestSeedGroupRecombinantAttachment:
             if mut.node in group_nodes
         )
         assert positions == [11, 15]
+
+
+class TestSeedGroupDivergentLineages:
+    """
+    Three widely diverged lineages, each a pair of samples differing by a single
+    private mutation, seeded as one group with missing runs interspersed.
+
+    The whole group goes into the ARG as one local tree: a group root carrying
+    the mutations all six share, one node per lineage carrying that lineage's
+    mutations, and each pair a cherry below it. A missing allele must be imputed
+    from the sample's place in that tree rather than from the haplotype the
+    group matched to, which here is the reference.
+    """
+
+    # 60bp, so sites sit at 1-based positions 1..60. As in the classes above,
+    # the dicts below are keyed by 0-based index into the reference string, and
+    # the genome position of index i is i + 1.
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT" * 2
+
+    # Carried by all six, so they end up on the group's root node.
+    shared = {2: "G", 6: "T", 10: "A"}
+    # Four mutations each, and no overlap between them: the lineages are far
+    # enough apart that neighbour joining recovers the pairs regardless of which
+    # alleles the missing runs take out.
+    lineages = {
+        "a": {13: "A", 16: "C", 20: "G", 23: "T"},
+        "b": {26: "C", 29: "G", 32: "T", 35: "A"},
+        "c": {38: "A", 41: "T", 44: "C", 47: "G"},
+    }
+    # The two members of a pair differ by exactly this one mutation.
+    private = {"a1": {51: "A"}, "b1": {54: "T"}, "c1": {57: "C"}}
+    seeds = ["a0", "a1", "b0", "b1", "c0", "c1"]
+
+    # Missing runs, of the shape an amplicon dropout leaves behind. Each covers
+    # at least one variable site. Index 30 is invariant and missing in every
+    # member, so the group's ancestor is unknown there.
+    missing_runs = {
+        "a0": [(15, 19), (30, 31)],  # 16, lineage a: derived
+        "a1": [(2, 5), (30, 31)],  # 2, shared: derived
+        "b0": [(19, 22), (30, 31)],  # 20, lineage a: reference for b0
+        "b1": [(5, 8), (30, 31)],  # 6, shared: derived
+        "c0": [(43, 46), (30, 31)],  # 44, lineage c: derived
+        "c1": [(12, 15), (40, 43), (30, 31)],  # 13 reference for c1; 41 derived
+    }
+
+    def mutations(self, name):
+        muts = {**self.shared, **self.lineages[name[0]]}
+        muts.update(self.private.get(name, {}))
+        return muts
+
+    def alignment(self, name, mask):
+        h = list(self.reference)
+        for pos, base in self.mutations(name).items():
+            assert h[pos] != base
+            h[pos] = base
+        if mask:
+            for start, stop in self.missing_runs[name]:
+                for j in range(start, stop):
+                    h[j] = "N"
+        return jit.encode_alleles(np.array(h))
+
+    def build(self, tmp_path):
+        """
+        Return (ts, true_alignments), where true_alignments are the haplotypes
+        before masking. The ARG has no missing data in it, so it is the
+        unmasked haplotypes that the inference has to recover.
+        """
+        alignments = {name: self.alignment(name, True) for name in self.seeds}
+        true_alignments = {name: self.alignment(name, False) for name in self.seeds}
+        ds = sc2ts.dataset.tmp_dataset(
+            tmp_path / "ds.zarr",
+            alignments,
+            date="2020-01-01",
+            contig_id="chr_test",
+        )
+        base_ts = si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+        base_ts.dump(tmp_path / "base.ts")
+        si.MatchDb.initialise(tmp_path / "match.db")
+        ts = si.extend(
+            dataset=ds.path,
+            base_ts=str(tmp_path / "base.ts"),
+            date="2020-01-01",
+            match_db=str(tmp_path / "match.db"),
+            min_group_size=1,
+            num_threads=0,
+            seed_groups=[self.seeds],
+        )
+        return ts, true_alignments
+
+    def nodes(self, ts):
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        return {name: ts.samples()[strains.index(name)] for name in self.seeds}
+
+    def pair_nodes(self, ts):
+        """
+        Return the mapping of lineage name to the MRCA of that lineage's pair.
+        """
+        nodes = self.nodes(ts)
+        tree = ts.first()
+        return {name: tree.parent(nodes[f"{name}0"]) for name in self.lineages}
+
+    def group_root(self, ts):
+        tree = ts.first()
+        (root,) = {tree.parent(u) for u in self.pair_nodes(ts).values()}
+        return root
+
+    def mutations_on(self, ts, node):
+        return sorted(
+            (int(ts.sites_position[mut.site]), mut.derived_state)
+            for mut in ts.mutations()
+            if mut.node == node
+        )
+
+    def test_dimensions(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        assert ts.sequence_length == len(self.reference) + 1
+        assert ts.num_sites == len(self.reference)
+        assert ts.num_samples == len(self.seeds)
+        assert ts.num_trees == 1
+        # Two nodes from initial_ts, the group root, three lineage nodes and
+        # the six seeds. Nothing else was needed to explain the data.
+        assert ts.num_nodes == 12
+        for site in ts.sites():
+            assert site.ancestral_state == self.reference[int(site.position) - 1]
+
+    def test_haplotypes_recover_the_truth(self, tmp_path):
+        ts, true_alignments = self.build(tmp_path)
+        nodes = self.nodes(ts)
+        # Every sample reads back as its unmasked haplotype: the ARG has no
+        # missing data in it, so each missing allele has been imputed, and it
+        # has to be imputed from the group's own tree.
+        for name in self.seeds:
+            nt.assert_array_equal(
+                si.node_haplotypes(ts, [nodes[name]])[0], true_alignments[name]
+            )
+
+    @pytest.mark.parametrize(
+        ["name", "index"],
+        [
+            ("a0", 16),  # lineage a's allele, from the pair's other member
+            ("c0", 44),  # likewise for lineage c
+            ("c1", 41),
+            ("a1", 2),  # a shared allele, from the group root
+            ("b1", 6),
+        ],
+    )
+    def test_missing_site_takes_the_derived_allele(self, tmp_path, name, index):
+        # The sharp version of the test above. flat_group_ts records a missing
+        # allele as the absence of a mutation, so it reads as the ancestral
+        # state; without group_missing_mask parsimony has to reproduce that and
+        # the sample silently ends up on the reference allele here.
+        ts, true_alignments = self.build(tmp_path)
+        u = self.nodes(ts)[name]
+        derived = self.mutations(name)[index]
+        assert self.reference[index] != derived
+        assert core.IUPAC_ALLELES[si.node_haplotypes(ts, [u])[0][index]] == derived
+
+    @pytest.mark.parametrize(["name", "index"], [("b0", 20), ("c1", 13)])
+    def test_missing_site_keeps_the_reference_allele(self, tmp_path, name, index):
+        # The other direction: these samples are missing at a site where a
+        # *different* lineage is derived, so imputing from their own lineage has
+        # to leave them on the reference allele.
+        ts, _ = self.build(tmp_path)
+        u = self.nodes(ts)[name]
+        assert index not in self.mutations(name)
+        allele = core.IUPAC_ALLELES[si.node_haplotypes(ts, [u])[0][index]]
+        assert allele == self.reference[index]
+
+    def test_no_reversions(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        # A missing allele read as the ancestral state shows up as a reversion
+        # pinned onto the masked sample's own branch. There is nothing here
+        # that needs a mutation twice, so there should be none at all.
+        assert np.all(ts.mutations_parent == tskit.NULL)
+
+    def test_mutations(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        # Exactly the planted mutations, each appearing once: three shared,
+        # four per lineage, and one private per pair.
+        expected = sorted(
+            [(pos + 1, base) for pos, base in self.shared.items()]
+            + [
+                (pos + 1, base)
+                for muts in self.lineages.values()
+                for pos, base in muts.items()
+            ]
+            + [
+                (pos + 1, base)
+                for muts in self.private.values()
+                for pos, base in muts.items()
+            ]
+        )
+        assert len(expected) == 18
+        observed = sorted(
+            (int(ts.sites_position[mut.site]), mut.derived_state)
+            for mut in ts.mutations()
+        )
+        assert observed == expected
+
+    def test_pairs_form_cherries(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        nodes = self.nodes(ts)
+        tree = ts.first()
+        pair_nodes = self.pair_nodes(ts)
+        # Each pair hangs off its own lineage node, and nothing else does.
+        assert len(set(pair_nodes.values())) == len(self.lineages)
+        for name, mrca in pair_nodes.items():
+            assert tree.parent(nodes[f"{name}1"]) == mrca
+            assert set(tree.children(mrca)) == {nodes[f"{name}0"], nodes[f"{name}1"]}
+
+    def test_lineage_nodes_carry_lineage_mutations(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        for name, mrca in self.pair_nodes(ts).items():
+            expected = sorted(
+                (pos + 1, base) for pos, base in self.lineages[name].items()
+            )
+            assert self.mutations_on(ts, mrca) == expected
+
+    def test_private_mutations_on_the_right_leaves(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        nodes = self.nodes(ts)
+        for name in self.seeds:
+            expected = sorted(
+                (pos + 1, base) for pos, base in self.private.get(name, {}).items()
+            )
+            assert self.mutations_on(ts, nodes[name]) == expected
+
+    def test_group_root(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        tree = ts.first()
+        root = self.group_root(ts)
+        assert root not in self.nodes(ts).values()
+        # The mutations every member shares sit here rather than being repeated
+        # on each lineage.
+        assert self.mutations_on(ts, root) == sorted(
+            (pos + 1, base) for pos, base in self.shared.items()
+        )
+        # The ancestor is a clean match to the reference node, so the group
+        # hangs off it by one edge spanning the whole sequence.
+        assert ts.nodes_flags[root] & sc2ts.NODE_IS_RECOMBINANT == 0
+        assert ts.nodes_flags[tree.parent(root)] & sc2ts.NODE_IS_REFERENCE > 0
+        edges = [e for e in ts.edges() if e.child == root]
+        assert len(edges) == 1
+        assert (edges[0].left, edges[0].right) == (0, ts.sequence_length)
+
+    def test_group_is_one_tree(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        nodes = self.nodes(ts)
+        internal = [*self.pair_nodes(ts).values(), self.group_root(ts)]
+        group_ids = {
+            ts.node(u).metadata["sc2ts"]["group_id"]
+            for u in [*nodes.values(), *internal]
+        }
+        assert len(group_ids) == 1
+        for u in nodes.values():
+            assert ts.nodes_flags[u] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
+            # Inserted on their own date, so no "future" times here.
+            assert ts.nodes_time[u] == 0
+        # The internal nodes are stacked just above the samples in postorder.
+        assert sorted(ts.nodes_time[internal]) == pytest.approx(
+            [1e-6, 2e-6, 3e-6, 4e-6][: len(internal)]
+        )
+
+    def test_members_share_the_ancestor_hmm_match(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        tree = ts.first()
+        reference_node = tree.parent(self.group_root(ts))
+        matches = []
+        for name, u in self.nodes(ts).items():
+            hmm_match = ts.node(u).metadata["sc2ts"]["hmm_match"]
+            # Nothing to recombine with in an ARG holding only the reference.
+            assert len(hmm_match["path"]) == 1
+            assert hmm_match["path"][0]["parent"] == reference_node
+            matches.append(hmm_match)
+        # Every member reports the match that placed the group.
+        assert all(match == matches[0] for match in matches)
+
+    def test_all_missing_site(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        # Index 30 is invariant and missing in every member, so there is
+        # nothing to place there and the samples read as the reference.
+        (site,) = [s for s in ts.sites() if int(s.position) == 31]
+        assert len(site.mutations) == 0
+        assert site.metadata["sc2ts"]["missing_samples"] == len(self.seeds)
+
+    def test_ancestor_is_unknown_at_the_all_missing_site(self, tmp_path):
+        # The group's ancestor is matched with MISSING at index 30 so that the
+        # HMM ignores it, rather than asserting the reference allele there.
+        base_ts = si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+        samples = [
+            si.Sample(name, haplotype=self.alignment(name, True)) for name in self.seeds
+        ]
+        root = si.infer_seed_group_root(
+            base_ts, samples, si.reference_haplotype(base_ts)
+        )
+        assert root[30] == si.MISSING
+        # Everywhere else it is the reference plus the shared mutations, which
+        # a1 and b1 are masked at: partial missingness must not lose them.
+        assert set(np.where(root != si.reference_haplotype(base_ts))[0]) == {
+            *self.shared,
+            30,
+        }
+
+    def test_site_missing_sample_counts(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        expected = {}
+        for name in self.seeds:
+            for start, stop in self.missing_runs[name]:
+                for j in range(start, stop):
+                    expected[j + 1] = expected.get(j + 1, 0) + 1
+        observed = {
+            int(site.position): site.metadata["sc2ts"]["missing_samples"]
+            for site in ts.sites()
+            if site.metadata["sc2ts"]["missing_samples"] > 0
+        }
+        assert observed == expected
+
+    def test_num_missing_sites_metadata(self, tmp_path):
+        ts, _ = self.build(tmp_path)
+        for name, u in self.nodes(ts).items():
+            expected = sum(stop - start for start, stop in self.missing_runs[name])
+            assert ts.node(u).metadata["sc2ts"]["num_missing_sites"] == expected
 
 
 class TestSeedGroup:

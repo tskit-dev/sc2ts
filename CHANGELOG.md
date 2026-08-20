@@ -8,21 +8,11 @@ In development
   list of seed *groups*, each a list of strain IDs that are inserted into the
   ARG together as a single local tree. A tree is inferred over the group's
   haplotypes, the haplotype of the group's inferred ancestor is matched against
-  the ARG, and the whole group is then attached at that placement. Seed samples
-  are usually far diverged from the current ARG, so matching each one
-  individually gave spurious recombinations or matches to derived samples with
-  large numbers of reversions; the inferred ancestor is much closer to the
-  contemporaneous ARG. The ancestor is matched with the run's `num_mismatches`
-  like any other sample, so a group can be placed as a recombinant, in which
-  case it is attached across the matched path and its root node is flagged
-  `NODE_IS_RECOMBINANT`. A group is inserted on the minimum date over its
-  members, and members with later dates keep their real dates via negative ("in
-  the future") node times. The previous `include_samples` formats (bare strain
-  IDs, or `(strain, match_date)` tuples) are no longer supported.
-
-  Note that the `hmm_match` metadata of a seed node records the match that placed
-  its *group*, not a per-sample match, so its mutation count is not the number of
-  mutations between that sample and its parent.
+  the ARG, and the whole group is then attached at that placement. A group is
+  inserted on the minimum date over its members, and members with later dates
+  keep their real dates via negative ("in the future") node times. The previous
+  `include_samples` formats (bare strain IDs, or `(strain, match_date)` tuples)
+  are no longer supported.
 
 - Fix retrospective matching on a day with no new samples. The table of samples
   already in the ARG was only rebuilt when there were samples to match, so on
