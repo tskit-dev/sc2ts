@@ -11,7 +11,7 @@ import tskit
 import util
 
 import sc2ts
-from sc2ts import debug, jit, tree_ops, validation
+from sc2ts import core, debug, jit, tree_ops, validation
 from sc2ts import inference as si
 
 
@@ -688,6 +688,211 @@ class TestFlatGroupTs:
         ancestral[4] = si.MISSING
         with pytest.raises(AssertionError):
             si.flat_group_ts(ts, [self.sample("a")], ancestral)
+
+
+class TestPathHaplotype:
+    """
+    path_haplotype assembles the mosaic haplotype implied by an HMM copying
+    path. Segments are half-open [left, right) intervals in genome position
+    coordinates, i.e. PathSegment.contains vectorised over sites_position.
+    """
+
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT"
+
+    @property
+    def base_ts(self):
+        # 30 sites at 1-based positions 1..30; node 1 is the reference node.
+        return si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+
+    def two_parent_ts(self):
+        """
+        Return (ts, a, b) where a and b are node IDs whose haplotypes differ at
+        every site: a is the reference and b is its complement.
+        """
+        ts = self.base_ts
+        tables = ts.dump_tables()
+        complement = {"A": "T", "C": "G", "G": "C", "T": "A"}
+        b = tables.nodes.add_row(time=0)
+        tables.edges.add_row(0, tables.sequence_length, parent=0, child=b)
+        for site in ts.sites():
+            tables.mutations.add_row(
+                site=site.id,
+                node=b,
+                derived_state=complement[site.ancestral_state],
+            )
+        tables.sort()
+        tables.build_index()
+        tables.compute_mutation_parents()
+        return tables.tree_sequence(), 1, b
+
+    def test_single_segment_is_parent_haplotype(self):
+        ts = self.base_ts
+        L = ts.sequence_length
+        path = [si.PathSegment(0, L, 1)]
+        nt.assert_array_equal(
+            si.path_haplotype(ts, path), si.node_haplotypes(ts, [1])[0]
+        )
+
+    def test_two_segments_form_mosaic(self):
+        ts, a, b = self.two_parent_ts()
+        L = ts.sequence_length
+        ha, hb = si.node_haplotypes(ts, [a, b])
+        bp = 16
+        h = si.path_haplotype(ts, [si.PathSegment(0, bp, a), si.PathSegment(bp, L, b)])
+        left = ts.sites_position < bp
+        nt.assert_array_equal(h[left], ha[left])
+        nt.assert_array_equal(h[~left], hb[~left])
+        # The mosaic is neither parent on its own.
+        assert not np.array_equal(h, ha)
+        assert not np.array_equal(h, hb)
+
+    def test_segment_interval_is_half_open(self):
+        # [left, right): a site exactly at left is covered, one exactly at right
+        # is not. Use a single segment, because in a two-segment path the
+        # following segment overwrites the boundary site and so would mask an
+        # off-by-one here.
+        ts, a, b = self.two_parent_ts()
+        ha = si.node_haplotypes(ts, [a])[0]
+        bp = 16
+        (index,) = np.where(ts.sites_position == bp)
+        assert len(index) == 1
+        j = index[0]
+        left = si.path_haplotype(ts, [si.PathSegment(0, bp, a)])
+        assert left[j] == si.MISSING
+        assert left[j - 1] == ha[j - 1]
+        right = si.path_haplotype(ts, [si.PathSegment(bp, ts.sequence_length, a)])
+        assert right[j] == ha[j]
+        assert right[j - 1] == si.MISSING
+
+    def test_breakpoint_site_taken_from_second_segment(self):
+        ts, a, b = self.two_parent_ts()
+        L = ts.sequence_length
+        ha, hb = si.node_haplotypes(ts, [a, b])
+        bp = 16
+        h = si.path_haplotype(ts, [si.PathSegment(0, bp, a), si.PathSegment(bp, L, b)])
+        (index,) = np.where(ts.sites_position == bp)
+        j = index[0]
+        assert h[j] == hb[j]
+        assert h[j - 1] == ha[j - 1]
+
+    def test_gap_left_missing(self):
+        # An incomplete path shows up as MISSING rather than quietly reading as
+        # the first allele. flat_group_ts asserts on this downstream; see
+        # TestFlatGroupTs.test_missing_ancestral_allele_rejected.
+        ts, a, b = self.two_parent_ts()
+        L = ts.sequence_length
+        h = si.path_haplotype(ts, [si.PathSegment(0, 10, a), si.PathSegment(20, L, b)])
+        gap = (ts.sites_position >= 10) & (ts.sites_position < 20)
+        assert np.all(h[gap] == si.MISSING)
+        assert not np.any(h[~gap] == si.MISSING)
+        with pytest.raises(AssertionError):
+            si.flat_group_ts(ts, [], h)
+
+    def test_uncovered_tail_missing(self):
+        ts = self.base_ts
+        h = si.path_haplotype(ts, [si.PathSegment(0, 10, 1)])
+        assert np.all(h[ts.sites_position >= 10] == si.MISSING)
+
+    @pytest.mark.parametrize("bp", [1, 10, 16, 30])
+    def test_same_parent_either_side(self, bp):
+        # A path that returns to the same parent must reproduce that parent's
+        # haplotype exactly, exercising the duplicate-node dedupe.
+        ts = self.base_ts
+        L = ts.sequence_length
+        path = [si.PathSegment(0, bp, 1), si.PathSegment(bp, L, 1)]
+        nt.assert_array_equal(
+            si.path_haplotype(ts, path), si.node_haplotypes(ts, [1])[0]
+        )
+
+    def test_three_segments_returning_to_first_parent(self):
+        ts, a, b = self.two_parent_ts()
+        L = ts.sequence_length
+        ha, hb = si.node_haplotypes(ts, [a, b])
+        path = [
+            si.PathSegment(0, 10, a),
+            si.PathSegment(10, 20, b),
+            si.PathSegment(20, L, a),
+        ]
+        h = si.path_haplotype(ts, path)
+        pos = ts.sites_position
+        middle = (pos >= 10) & (pos < 20)
+        nt.assert_array_equal(h[middle], hb[middle])
+        nt.assert_array_equal(h[~middle], ha[~middle])
+
+    def test_overlapping_segments_later_wins(self):
+        ts, a, b = self.two_parent_ts()
+        L = ts.sequence_length
+        path = [si.PathSegment(0, L, a), si.PathSegment(0, L, b)]
+        nt.assert_array_equal(
+            si.path_haplotype(ts, path), si.node_haplotypes(ts, [b])[0]
+        )
+
+    def test_zero_width_segment_contributes_nothing(self):
+        ts, a, b = self.two_parent_ts()
+        L = ts.sequence_length
+        path = [si.PathSegment(0, L, a), si.PathSegment(10, 10, b)]
+        nt.assert_array_equal(
+            si.path_haplotype(ts, path), si.node_haplotypes(ts, [a])[0]
+        )
+
+    def test_length_is_num_sites(self):
+        ts = self.base_ts
+        for path in [
+            [si.PathSegment(0, ts.sequence_length, 1)],
+            [si.PathSegment(0, 5, 1)],
+        ]:
+            assert len(si.path_haplotype(ts, path)) == ts.num_sites
+
+    def test_empty_path_rejected(self):
+        # An empty path never comes out of the HMM; this documents that it is
+        # not a supported input.
+        with pytest.raises(IndexError):
+            si.path_haplotype(self.base_ts, [])
+
+
+class TestReferenceHaplotype:
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT"
+
+    @property
+    def base_ts(self):
+        return si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+
+    def test_encoding(self):
+        ts = self.base_ts
+        h = si.reference_haplotype(ts)
+        assert len(h) == ts.num_sites
+        assert "".join(core.IUPAC_ALLELES[j] for j in h) == self.reference
+
+    def test_agrees_with_reference_node_haplotype(self):
+        # Node 1 is the reference node and carries no mutations, so the two
+        # routes to the ancestral states must agree.
+        ts = self.base_ts
+        assert ts.nodes_flags[1] & core.NODE_IS_REFERENCE > 0
+        nt.assert_array_equal(si.reference_haplotype(ts), si.node_haplotypes(ts, [1])[0])
+
+    def test_returns_fresh_array(self):
+        ts = self.base_ts
+        h = si.reference_haplotype(ts)
+        h[0] = si.MISSING
+        assert si.reference_haplotype(ts)[0] != si.MISSING
+
+    def test_unknown_ancestral_state_is_missing(self):
+        # N maps to MISSING here, where node_haplotypes raises instead.
+        tables = self.base_ts.dump_tables()
+        sites = tables.sites.copy()
+        tables.sites.clear()
+        for j, site in enumerate(sites):
+            tables.sites.append(site.replace(ancestral_state="N") if j == 0 else site)
+        ts = tables.tree_sequence()
+        assert si.reference_haplotype(ts)[0] == si.MISSING
 
 
 class TestSeedGroupAttachment:
@@ -2287,6 +2492,103 @@ class TestExtractHaplotypes:
         tables.mutations.add_row(site=0, node=3, derived_state="T")
         ts = tables.tree_sequence()
         nt.assert_array_equal(si.extract_haplotypes(ts, samples), result)
+
+
+class TestNodeHaplotypes:
+    """
+    Note that node_haplotypes returns int32 (tskit's genotype dtype) while
+    Sample.haplotype and reference_haplotype are int8. Comparisons work by
+    numpy promotion, so the difference is not a bug.
+    """
+
+    def comb_ts(self, ancestral, derived, node=3):
+        # 3.00┊   6     ┊
+        #     ┊ ┏━┻━┓   ┊
+        # 2.00┊ ┃   5   ┊
+        #     ┊ ┃ ┏━┻┓  ┊
+        # 1.00┊ ┃ ┃  4  ┊
+        #     ┊ ┃ ┃ ┏┻┓ ┊
+        # 0.00┊ 0 1 2 3x┊
+        #     0         1
+        tables = tskit.Tree.generate_comb(4).tree_sequence.dump_tables()
+        tables.sites.add_row(0, ancestral)
+        tables.mutations.add_row(site=0, node=node, derived_state=derived)
+        return tables.tree_sequence()
+
+    def test_iupac_codes_not_site_local_indexes(self):
+        # The whole point of node_haplotypes over extract_haplotypes. With an
+        # ancestral state of "A" the two agree by coincidence, so use "G".
+        ts = self.comb_ts("G", "C")
+        nt.assert_array_equal(si.extract_haplotypes(ts, [0, 3]), [[0], [1]])
+        nt.assert_array_equal(si.node_haplotypes(ts, [0, 3]), [[2], [1]])
+        assert core.IUPAC_ALLELES[2] == "G"
+        assert core.IUPAC_ALLELES[1] == "C"
+
+    @pytest.mark.parametrize(
+        ["nodes", "result"],
+        [
+            ([0], [[2]]),
+            ([3], [[1]]),
+            ([0, 3], [[2], [1]]),
+            # Reversed, so we're testing the unique_nodes.index() remap and not
+            # just the order that set() happens to iterate in.
+            ([3, 0], [[1], [2]]),
+            ([0, 1, 2, 3], [[2], [2], [2], [1]]),
+            ([3, 1, 2, 3], [[1], [2], [2], [1]]),
+            ([3, 3, 3, 3], [[1], [1], [1], [1]]),
+        ],
+    )
+    def test_duplicates_and_order(self, nodes, result):
+        ts = self.comb_ts("G", "C")
+        nt.assert_array_equal(si.node_haplotypes(ts, nodes), result)
+
+    def test_empty_nodes(self):
+        assert si.node_haplotypes(self.comb_ts("G", "C"), []) == []
+
+    def test_returned_rows_alias(self):
+        # Duplicated entries are the same row of the underlying matrix, so a
+        # caller writing into one array changes the other.
+        ts = self.comb_ts("G", "C")
+        h = si.node_haplotypes(ts, [0, 0])
+        assert np.shares_memory(h[0], h[1])
+        h[0][0] = 9
+        assert h[1][0] == 9
+
+    def test_internal_nodes(self):
+        # Any node ID is allowed, not just samples. Node 4 is the parent of the
+        # mutated leaf 3, so it keeps the ancestral state.
+        ts = self.comb_ts("G", "C")
+        nt.assert_array_equal(si.node_haplotypes(ts, [4, 5, 6]), [[2], [2], [2]])
+
+    def test_isolated_node_reads_as_ancestral(self):
+        # isolated_as_missing=False, so a node with no ancestry gets the
+        # ancestral state rather than MISSING.
+        tables = tskit.TableCollection(sequence_length=2)
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)  # 0, isolated
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)  # 1
+        tables.nodes.add_row(time=1)  # 2, root
+        tables.edges.add_row(0, 2, parent=2, child=1)
+        tables.sites.add_row(0, "G")
+        tables.sort()
+        ts = tables.tree_sequence()
+        nt.assert_array_equal(si.node_haplotypes(ts, [0]), [[2]])
+        assert si.node_haplotypes(ts, [0])[0][0] != si.MISSING
+
+    def test_deletion_allele(self):
+        ts = self.comb_ts("G", "-")
+        nt.assert_array_equal(si.node_haplotypes(ts, [3]), [[si.DELETION]])
+
+    def test_node_out_of_bounds(self):
+        ts = self.comb_ts("G", "C")
+        with pytest.raises(tskit.LibraryError, match="Node out of bounds"):
+            si.node_haplotypes(ts, [ts.num_nodes])
+
+    def test_non_iupac_allele(self):
+        # N is not in IUPAC_ALLELES, so the allele map lookup fails. Contrast
+        # with reference_haplotype, which maps it to MISSING.
+        ts = self.comb_ts("N", "C")
+        with pytest.raises(tskit.LibraryError, match="allele was not found"):
+            si.node_haplotypes(ts, [0])
 
 
 @pytest.fixture
