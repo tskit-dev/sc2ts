@@ -625,9 +625,10 @@ def extend(
     A group is inserted on the *minimum* date over its members. Members with
     later dates keep their real dates and so are given negative ("in the
     future") node times relative to that day's time-zero, becoming visible to
-    the matcher once their real date is reached. Because the insertion date is
-    always one of the group's own dataset dates, it is a date the pipeline
-    processes, unless it falls outside the run's date window.
+    the matcher the day after their real date, exactly as an ordinary sample
+    added on a given day is only copied from on the following day. Because the
+    insertion date is always one of the group's own dataset dates, it is a date
+    the pipeline processes, unless it falls outside the run's date window.
     """
     if num_mismatches is None:
         num_mismatches = 3

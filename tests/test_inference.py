@@ -389,6 +389,15 @@ class TestMatchTsinfer:
         assert matches[0].parents == [u]
         assert len(matches[0].mutations) == 0
 
+    def test_matches_to_node_at_time_zero(self):
+        # The boundary: detach_future_nodes uses a strict < 0, so a node at
+        # exactly time zero is still a valid copying target. This is what lets
+        # a sample added on one day be copied from on the next.
+        ts, u, sample, site_id = self._extra_node_setup(node_time=0)
+        matches = self.match_tsinfer([sample], ts)
+        assert matches[0].parents == [u]
+        assert len(matches[0].mutations) == 0
+
     def test_no_match_to_future_node(self):
         # A future (negative-time) node that is an exact match must NOT be
         # copied from; the sample falls back to the reference and carries the
@@ -986,6 +995,107 @@ class TestSeedGroupAttachment:
         # The stored match is the one that placed the group, so every member
         # reports the same thing.
         assert matches[0] == matches[1]
+
+
+class TestSeedSameDayVisibility:
+    """
+    A seed inserted on day D is not a copying target for the ordinary samples
+    processed on D, even though its node time is exactly zero rather than
+    negative, so detach_future_nodes never touches it.
+
+    Two independent reasons, both in _extend: the day's ordinary samples are
+    matched against base_ts, the day D-1 ARG (inference.py:774), and seeds are
+    appended to ts only afterwards (inference.py:805). The seed group's own
+    root is matched against that same base_ts, so seeds and ordinary samples
+    see an identical set of copying targets on the day. A seed becomes
+    copyable on the next processed date, exactly as an ordinary sample added
+    on a given day is only copied from on the following day.
+    """
+
+    reference = "AAAACCCCGGGGTTTTAAAACCCCGGGGTT"
+    # The shared haplotype: two mutations away from the reference, so a sample
+    # falling back to the reference is clearly distinguishable from one
+    # copying off the seed.
+    mutations = {4: "T", 8: "A"}
+
+    def alignment(self):
+        h = list(self.reference)
+        for pos, base in self.mutations.items():
+            assert h[pos] != base
+            h[pos] = base
+        return jit.encode_alleles(np.array(h))
+
+    def build(self, tmp_path, strain_dates):
+        # Every strain gets the same alignment, so any of them would be an
+        # exact match to any other if it were available to copy from.
+        alignments = {name: self.alignment() for name in strain_dates}
+        ds = sc2ts.dataset.tmp_dataset(
+            tmp_path / "ds.zarr",
+            alignments,
+            date=list(strain_dates.values()),
+            contig_id="chr_test",
+        )
+        base_ts = si.initial_ts(
+            reference_sequence="X" + self.reference,
+            reference_id="chr_test",
+            reference_date="2019-01-01",
+        )
+        base_path = tmp_path / "base.ts"
+        base_ts.dump(base_path)
+        match_db = si.MatchDb.initialise(tmp_path / "match.db")
+        for date in sorted(set(strain_dates.values())):
+            ts = si.extend(
+                dataset=ds.path,
+                base_ts=str(base_path),
+                date=date,
+                match_db=str(match_db.path),
+                min_group_size=1,
+                seed_groups=[["A"]],
+            )
+            ts.dump(base_path)
+        return ts
+
+    def node_for(self, ts, strain):
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        if strain not in strains:
+            return None
+        return ts.samples()[strains.index(strain)]
+
+    def test_same_day_sample_does_not_match_seed(self, tmp_path):
+        ts = self.build(tmp_path, {"A": "2020-01-01", "B": "2020-01-01"})
+        strains = ts.metadata["sc2ts"]["samples_strain"]
+        # B goes into the ARG as its own sample rather than being absorbed as
+        # an exact match of the identical seed.
+        assert "A" in strains
+        assert "B" in strains
+        assert ts.metadata["sc2ts"]["cumulative_stats"]["exact_matches"]["node"] == {}
+        a = self.node_for(ts, "A")
+        b = self.node_for(ts, "B")
+        # The seed is present at time zero, not in the future, so nothing about
+        # detach_future_nodes is keeping B away from it.
+        assert ts.nodes_time[a] == 0
+        assert ts.nodes_flags[a] & sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED > 0
+        hmm_match = ts.node(b).metadata["sc2ts"]["hmm_match"]
+        parents = [seg["parent"] for seg in hmm_match["path"]]
+        # B fell back to the reference and carries both mutations itself,
+        # rather than copying them from the identical seed.
+        assert a not in parents
+        assert parents == [1]
+        assert len(hmm_match["mutations"]) == len(self.mutations)
+
+    def test_next_day_sample_exact_matches_seed(self, tmp_path):
+        # The complement of the test above: without it, "B did not match A"
+        # would be indistinguishable from matching being broken. Note B is
+        # deliberately absent here, because A and B coalesce and a later
+        # sample would then match their shared parent rather than A itself.
+        ts = self.build(tmp_path, {"A": "2020-01-01", "C": "2020-01-02"})
+        a = self.node_for(ts, "A")
+        assert a is not None
+        assert ts.metadata["sc2ts"]["cumulative_stats"]["exact_matches"]["node"] == {
+            str(a): 1
+        }
+        # An exact match is counted, not inserted as a sample of its own.
+        assert self.node_for(ts, "C") is None
 
 
 class TestSeedGroupRecombinantAttachment:
