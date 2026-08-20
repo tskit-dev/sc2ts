@@ -394,7 +394,9 @@ class ArgInfo:
         self.nodes_num_parents = np.bincount(ts.edges_child, minlength=ts.num_edges)
 
         # The number of samples per day in time-ago (i.e., the nodes_time units).
-        self.num_samples_per_day = np.bincount(ts.nodes_time[samples].astype(int))
+        # Future (negative-time) samples have no days-ago bin, so are not counted.
+        sample_times = ts.nodes_time[samples].astype(int)
+        self.num_samples_per_day = np.bincount(sample_times[sample_times >= 0])
 
         self.sample_group_id_prefix_len = sample_group_id_prefix_len
         self.sample_group_nodes = collections.defaultdict(list)
@@ -625,7 +627,9 @@ class ArgInfo:
         samples = self.ts.samples()[1:]  # skip reference
         nodes_with_zero_muts = np.sum(self.nodes_num_mutations == 0)
         sites_with_zero_muts = np.sum(self.sites_num_mutations == 0)
-        latest_sample = self.nodes_date[samples[-1]]
+        # Not simply samples[-1]: a future (negative-time) seed sample can have a
+        # lower node ID than samples added after it, but a later date.
+        latest_sample = np.max(self.nodes_date[samples])
         missing_sites_per_sample = self.nodes_num_missing_sites[samples]
         deletion_sites_per_sample = self.nodes_num_deletion_sites[samples]
         non_samples = (self.ts.nodes_flags & tskit.NODE_IS_SAMPLE) == 0

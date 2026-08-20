@@ -754,6 +754,62 @@ class TestInferBinary:
         assert_variants_equal(ts1, ts2, allele_shuffle=True)
         self.check_properties(ts2)
 
+    def missing_example(self):
+        """
+        Return the flat ts for two pairs of samples over five sites. Samples 0
+        and 1 share the derived allele at sites 0 and 1, samples 2 and 3 share
+        it at sites 2 and 3, so the pairs are unambiguous. Only sample 0 is
+        derived at site 4, where sample 1 is the one we mark as missing.
+        """
+        L = 6
+        tables = tskit.TableCollection(L)
+        root = 4
+        for _ in range(4):
+            u = tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)
+            tables.edges.add_row(0, L, root, u)
+        tables.nodes.add_row(time=1)
+        derived = {0: [0, 1], 1: [0, 1], 2: [2, 3], 3: [2, 3], 4: [0]}
+        for site, nodes in derived.items():
+            tables.sites.add_row(site, "A")
+            for node in nodes:
+                tables.mutations.add_row(site, derived_state="T", node=node)
+        tables.sort()
+        return tables.tree_sequence()
+
+    def test_missing_imputed_from_the_tree(self):
+        ts1 = self.missing_example()
+        missing = np.zeros((4, 5), dtype=bool)
+        # Sample 1 did not observe site 4, where its pair partner is derived.
+        missing[1, 4] = True
+
+        # Without the mask, sample 1's allele at site 4 reads as ancestral and
+        # parsimony has to reproduce it, so the mutation is pinned onto sample
+        # 0's own branch and sample 1 keeps the ancestral allele.
+        before = tree_ops.infer_binary(ts1)
+        (mutation,) = [m for m in before.mutations() if m.site == 4]
+        assert mutation.node == 0
+        assert [v.genotypes[1] for v in before.variants()][4] == 0
+
+        # With it, the mutation moves up onto the branch the pair shares and
+        # sample 1 inherits the allele it never observed.
+        after = tree_ops.infer_binary(ts1, missing)
+        assert after.num_mutations == before.num_mutations
+        tree = after.first()
+        mrca = tree.parent(0)
+        assert tree.parent(1) == mrca
+        (mutation,) = [m for m in after.mutations() if m.site == 4]
+        assert mutation.node == mrca
+        assert [v.genotypes[1] for v in after.variants()][4] == 1
+
+    def test_all_missing_at_a_site_rejected(self):
+        # map_mutations needs at least one observation. Every site in a flat
+        # group ts has one by construction, so this just pins the behaviour.
+        ts1 = self.missing_example()
+        missing = np.zeros((4, 5), dtype=bool)
+        missing[:, 4] = True
+        with pytest.raises(tskit.LibraryError, match="non-missing"):
+            tree_ops.infer_binary(ts1, missing)
+
     @pytest.mark.parametrize("n", [2, 10])
     @pytest.mark.parametrize("num_mutations", [1, 2, 10])
     def test_simulation_root_mutations(self, n, num_mutations):
@@ -957,3 +1013,188 @@ class TestInsertVestigialRootEdge:
         ts = msprime.sim_ancestry(2)
         with pytest.raises(ValueError, match="Oldest edge"):
             tree_ops.insert_vestigial_root_edge(ts)
+
+
+def _incident_edges(ts, node):
+    return [(e.left, e.right, e.parent) for e in ts.edges() if e.child == node]
+
+
+def _is_sample(ts, node):
+    return bool(ts.nodes_flags[node] & tskit.NODE_IS_SAMPLE)
+
+
+class TestDetachFutureNodes:
+    def test_no_future_nodes_is_noop(self):
+        #  2.00┊   2   ┊
+        #      ┊ ┏━┻━┓ ┊
+        #  0.00┊ 0   1 ┊    both present samples
+        ts = tskit.Tree.generate_balanced(2, span=10).tree_sequence
+        result = tree_ops.detach_future_nodes(ts)
+        # Returned unchanged (same object) when there's nothing to do.
+        assert result is ts
+
+    def test_single_future_leaf(self):
+        #  2.00┊   0   ┊       root (non-sample)
+        #      ┊ ┏━┻━┓ ┊
+        #  0.00┊ 1   ┃ ┊       present sample, mutation at site 0
+        # -2.00┊     2 ┊       future sample, mutation at site 1
+        tables = tskit.TableCollection(sequence_length=10)
+        tables.nodes.add_row(time=2)  # 0 root
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)  # 1 present
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=-2)  # 2 future
+        tables.edges.add_row(0, 10, parent=0, child=1)
+        tables.edges.add_row(0, 10, parent=0, child=2)
+        tables.sites.add_row(1, "A")
+        tables.sites.add_row(2, "A")
+        tables.mutations.add_row(site=0, node=1, derived_state="T", time=0)
+        tables.mutations.add_row(site=1, node=2, derived_state="G", time=-2)
+        ts = prepare(tables)
+
+        result = tree_ops.detach_future_nodes(ts)
+        # Nodes preserved (ids and times), future node now isolated.
+        assert result.num_nodes == ts.num_nodes
+        nt.assert_array_equal(result.nodes_time, ts.nodes_time)
+        assert _incident_edges(result, 2) == []
+        assert result.num_edges == 1
+        assert _incident_edges(result, 1) == [(0, 10, 0)]
+        # The mutation over the future node is dropped; the present one stays.
+        assert result.num_mutations == 1
+        assert result.mutation(0).node == 1
+        # The future node is no longer a sample; the present one is untouched.
+        assert not _is_sample(result, 2)
+        assert _is_sample(result, 1)
+
+    def test_chain_of_future_nodes(self):
+        #  3.00┊   0   ┊       root (non-sample)
+        #      ┊ ┏━┻━┓ ┊
+        #  0.00┊ 1   2 ┊       present sample (2 has mutation), future chain below 2
+        # -1.00┊     3 ┊       future sample, mutation
+        # -3.00┊     4 ┊       future sample, mutation
+        tables = tskit.TableCollection(sequence_length=10)
+        tables.nodes.add_row(time=3)  # 0 root
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)  # 1 present
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)  # 2 present
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=-1)  # 3 future
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=-3)  # 4 future
+        tables.edges.add_row(0, 10, parent=0, child=1)
+        tables.edges.add_row(0, 10, parent=0, child=2)
+        tables.edges.add_row(0, 10, parent=2, child=3)
+        tables.edges.add_row(0, 10, parent=3, child=4)
+        for pos, node in [(1, 2), (2, 3), (3, 4)]:
+            tables.sites.add_row(pos, "A")
+        tables.mutations.add_row(site=0, node=2, derived_state="T", time=0)
+        tables.mutations.add_row(site=1, node=3, derived_state="C", time=-1)
+        tables.mutations.add_row(site=2, node=4, derived_state="G", time=-3)
+        ts = prepare(tables)
+
+        result = tree_ops.detach_future_nodes(ts)
+        # Both future edges gone; only the two present edges remain.
+        assert result.num_edges == 2
+        assert _incident_edges(result, 3) == []
+        assert _incident_edges(result, 4) == []
+        assert _incident_edges(result, 2) == [(0, 10, 0)]
+        # Only the mutation over the present node survives.
+        assert result.num_mutations == 1
+        assert result.mutation(0).node == 2
+        assert not _is_sample(result, 3)
+        assert not _is_sample(result, 4)
+
+    def test_future_internal_node(self):
+        #  4.00┊    0    ┊      root (non-sample)
+        #      ┊  ┏━┻━┓  ┊
+        #  0.00┊  1   ┃  ┊      present sample
+        # -1.00┊      2  ┊      FUTURE internal node (non-sample), mutation
+        #      ┊      ┃  ┊
+        # -3.00┊      3  ┊      future sample, mutation
+        tables = tskit.TableCollection(sequence_length=10)
+        tables.nodes.add_row(time=4)  # 0 root
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)  # 1 present
+        tables.nodes.add_row(time=-1)  # 2 future internal (non-sample)
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=-3)  # 3 future
+        tables.edges.add_row(0, 10, parent=0, child=1)
+        tables.edges.add_row(0, 10, parent=0, child=2)
+        tables.edges.add_row(0, 10, parent=2, child=3)
+        tables.sites.add_row(1, "A")
+        tables.sites.add_row(2, "A")
+        tables.mutations.add_row(site=0, node=2, derived_state="T", time=-1)
+        tables.mutations.add_row(site=1, node=3, derived_state="G", time=-3)
+        ts = prepare(tables)
+
+        result = tree_ops.detach_future_nodes(ts)
+        assert result.num_edges == 1
+        assert _incident_edges(result, 2) == []
+        assert _incident_edges(result, 3) == []
+        # Both future mutations dropped.
+        assert result.num_mutations == 0
+        # The already-non-sample internal node's flags are unchanged.
+        assert result.nodes_flags[2] == ts.nodes_flags[2]
+        assert not _is_sample(result, 3)
+
+    def test_future_recombinant_node(self):
+        tables = tskit.TableCollection(sequence_length=10)
+        tables.nodes.add_row(time=3)  # 0 root
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)  # 1 present
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)  # 2 present
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=-1)  # 3 future recomb
+        tables.edges.add_row(0, 10, parent=0, child=1)
+        tables.edges.add_row(0, 10, parent=0, child=2)
+        tables.edges.add_row(0, 5, parent=1, child=3)
+        tables.edges.add_row(5, 10, parent=2, child=3)
+        tables.sites.add_row(2, "A")
+        tables.mutations.add_row(site=0, node=3, derived_state="T", time=-1)
+        ts = prepare(tables)
+
+        result = tree_ops.detach_future_nodes(ts)
+        # Both partial-span parent edges of the future recombinant are removed.
+        assert _incident_edges(result, 3) == []
+        assert result.num_edges == 2
+        assert result.num_mutations == 0
+        assert not _is_sample(result, 3)
+
+    def test_present_recombinant_preserved(self):
+        tables = tskit.TableCollection(sequence_length=10)
+        tables.nodes.add_row(time=3)  # 0 root
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=1)  # 1 present
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=1)  # 2 present
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)  # 3 present recomb
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=-2)  # 4 future leaf
+        tables.edges.add_row(0, 10, parent=0, child=1)
+        tables.edges.add_row(0, 10, parent=0, child=2)
+        tables.edges.add_row(0, 5, parent=1, child=3)
+        tables.edges.add_row(5, 10, parent=2, child=3)
+        tables.edges.add_row(0, 10, parent=0, child=4)
+        ts = prepare(tables)
+
+        result = tree_ops.detach_future_nodes(ts)
+        # Only the future leaf's edge is removed.
+        assert _incident_edges(result, 4) == []
+        assert not _is_sample(result, 4)
+        # The present recombinant keeps both of its partial-span parent edges.
+        assert _incident_edges(result, 3) == [(0, 5, 1), (5, 10, 2)]
+        assert result.num_edges == ts.num_edges - 1
+
+    def test_single_tree(self):
+        # 2.00┊   6     ┊
+        #     ┊ ┏━┻━┓   ┊
+        # 1.00┊ ┃   5   ┊
+        #     ┊ ┃ ┏━┻┓  ┊
+        # 0.00┊ ┃ ┃  4  ┊
+        #     ┊ ┃ ┃ ┏┻┓ ┊
+        # -1.00┊ 0 1 2 3 ┊
+        #     0         1
+        # ->
+        # 2.00┊   6     ┊
+        #     ┊   ┻━┓   ┊
+        # 1.00┊     5   ┊
+        #     ┊     ┻┓  ┊
+        # 0.00┊      4  ┊
+        #     ┊         ┊
+        # -1.00┊ 0 1 2 3 ┊
+        tables = tskit.Tree.generate_comb(4, span=10).tree_sequence.dump_tables()
+        t = tables.nodes.time
+        t -= 1
+        tables.nodes.time = t
+        ts = tables.tree_sequence()
+        result = tree_ops.detach_future_nodes(ts)
+        parent_dict = result.first().parent_dict
+        assert parent_dict == {4: 5, 5: 6}

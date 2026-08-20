@@ -587,6 +587,31 @@ class TestDatasetMetadata:
         assert df.shape[0] == fx_dataset.metadata.num_fields
 
 
+class TestTmpDataset:
+    alignments = {
+        "a": np.array([0, 1, 2, 3]),
+        "b": np.array([3, 2, 1, 0]),
+    }
+
+    def test_single_date(self, tmp_path):
+        ds = sc2ts.dataset.tmp_dataset(
+            tmp_path / "ds.zarr", self.alignments, date="2020-01-01"
+        )
+        assert ds.metadata["a"]["date"] == "2020-01-01"
+        assert ds.metadata["b"]["date"] == "2020-01-01"
+
+    def test_date_per_sample(self, tmp_path):
+        ds = sc2ts.dataset.tmp_dataset(
+            tmp_path / "ds.zarr",
+            self.alignments,
+            date=["2020-01-01", "2020-01-02"],
+        )
+        assert ds.metadata["a"]["date"] == "2020-01-01"
+        assert ds.metadata["b"]["date"] == "2020-01-02"
+        ds = sc2ts.Dataset(ds.path, date_field="date")
+        assert list(ds.metadata.samples_for_date("2020-01-02")) == ["b"]
+
+
 class TestEncodeAlignment:
     @pytest.mark.parametrize(
         ["hap", "expected"],

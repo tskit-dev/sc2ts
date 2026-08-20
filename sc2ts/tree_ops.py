@@ -186,10 +186,22 @@ def infer_binary_topology(ts, tables):
 
 
 # TODO rename this to infer_sample_group_tree
-def infer_binary(ts):
+def infer_binary(ts, missing=None):
     """
     Infer a strictly binary tree from the variation data in the
     specified tree sequence.
+
+    ``missing`` is an optional boolean array of shape ``(ts.num_samples,
+    ts.num_sites)`` marking alleles that are missing rather than observed. The
+    flat trees we infer from record a missing allele as the absence of a
+    mutation, so without this it would read as the ancestral state and
+    parsimony would have to pin it onto the sample's own branch. Marking it
+    missing instead lets ``map_mutations`` treat it as unknown, so it is
+    imputed from the sample's position in the tree.
+
+    Note that the topology is inferred from Hamming distances which do read a
+    missing allele as the ancestral state, pulling a heavily masked sample
+    slightly towards the outgroup. Only the mutations are missing-aware.
     """
     assert ts.num_trees == 1
     assert list(ts.samples()) == list(range(ts.num_samples))
@@ -208,8 +220,11 @@ def infer_binary(ts):
     # Now add on mutations under parsimony
     tree = binary_ts.first()
     for v in ts.variants():
+        genotypes = v.genotypes
+        if missing is not None:
+            genotypes = np.where(missing[:, v.site.id], tskit.MISSING_DATA, genotypes)
         anc, muts = tree.map_mutations(
-            v.genotypes, v.alleles, ancestral_state=v.site.ancestral_state
+            genotypes, v.alleles, ancestral_state=v.site.ancestral_state
         )
         site = tables.sites.add_row(v.site.position, anc)
         for mut in muts:
@@ -654,6 +669,41 @@ def drop_vestigial_root_edge(ts):
     tables = ts.dump_tables()
     tables.edges.truncate(ts.num_edges - 1)
     tables.build_index()
+    return tables.tree_sequence()
+
+
+def detach_future_nodes(ts):
+    """
+    Return a copy of ``ts`` in which every node with a negative ("in the
+    future") time is fully detached: all edges incident to it are removed, any
+    mutations over it are dropped, and its ``NODE_IS_SAMPLE`` flag is cleared.
+
+    Such nodes are seed samples that were matched in on a date before their
+    actual date, and so lie in the future relative to the current time-zero.
+    Detaching them prevents other samples from copying from them during
+    matching. Node IDs and times are preserved so that any match paths
+    referring to the returned tree sequence remain valid against the original.
+    """
+    future = ts.nodes_time < 0
+    if not np.any(future):
+        return ts
+    tables = ts.dump_tables()
+    keep_edges = ~(future[tables.edges.parent] | future[tables.edges.child])
+    keep_mutations = ~future[tables.mutations.node]
+    logger.debug(
+        f"Detaching {int(np.sum(future))} future nodes "
+        f"({len(tables.edges) - int(np.sum(keep_edges))} edges, "
+        f"{len(tables.mutations) - int(np.sum(keep_mutations))} mutations removed)"
+    )
+    tables.edges.keep_rows(keep_edges)
+    tables.mutations.keep_rows(keep_mutations)
+    # A detached future node must not be treated as a sample to copy from.
+    flags = tables.nodes.flags
+    flags[future] &= ~np.uint32(tskit.NODE_IS_SAMPLE)
+    tables.nodes.flags = flags
+    tables.sort()
+    tables.build_index()
+    tables.compute_mutation_parents()
     return tables.tree_sequence()
 
 

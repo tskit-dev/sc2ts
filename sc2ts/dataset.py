@@ -646,9 +646,11 @@ def tmp_dataset(path, alignments, date="2020-01-01", contig_id=None):
     # Minimal hacky thing for testing. Should refactor into something more useful.
     if contig_id is None:
         contig_id = core.REFERENCE_STRAIN
+    if isinstance(date, str):
+        date = [date] * len(alignments)
     sequence_length = len(next(iter(alignments.values()))) + 1
     Dataset.new(path, sequence_length=sequence_length, contig_id=contig_id)
     Dataset.append_alignments(path, alignments)
-    df = pd.DataFrame({"strain": alignments.keys(), "date": [date] * len(alignments)})
+    df = pd.DataFrame({"strain": alignments.keys(), "date": date})
     Dataset.add_metadata(path, df.set_index("strain"))
     return Dataset(path)

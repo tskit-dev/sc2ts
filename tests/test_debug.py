@@ -32,6 +32,33 @@ def fx_ti_recombinant_example_1(fx_recombinant_example_1):
     return debug.ArgInfo(fx_recombinant_example_1, show_progress=False)
 
 
+@pytest.fixture
+def fx_ts_future_node(fx_ts_map):
+    # Mimic a seed group member that was inserted on the group's minimum date
+    # but is dated two days after time-zero, and so has a negative ("in the
+    # future") node time. See sc2ts.inference.check_seed_groups.
+    #
+    # SRR11494548 is a leaf whose parent has a positive time, and it is not the
+    # last sample by node ID, so it also exercises code that assumes node ID
+    # order matches sample date order.
+    ts = fx_ts_map["2020-02-13"]
+    strains = ts.metadata["sc2ts"]["samples_strain"]
+    u = ts.samples()[strains.index("SRR11494548")]
+    tables = ts.dump_tables()
+    row = tables.nodes[u]
+    md = row.metadata
+    md["date"] = "2020-02-15"
+    tables.nodes[u] = row.replace(
+        time=-2,
+        metadata=md,
+        flags=row.flags | sc2ts.NODE_IS_UNCONDITIONALLY_INCLUDED,
+    )
+    tables.sort()
+    tables.build_index()
+    tables.compute_mutation_parents()
+    return tables.tree_sequence(), u
+
+
 def test_get_gene_coordinates():
     d = sc2ts.data_import.get_gene_coordinates()
     assert len(d) == 11
@@ -240,6 +267,53 @@ class TestArgInfo:
         df1 = ti.recombinants_summary(show_progress=False)
         nt.assert_array_equal(df1.interval_left.values, [29824])
         nt.assert_array_equal(df1.interval_right.values, [29825])
+
+
+class TestFutureNodes:
+    """
+    ArgInfo must cope with "future" nodes, i.e. seed samples dated after
+    time-zero and so given a negative node time.
+    """
+
+    def test_arg_info(self, fx_ts_future_node):
+        ts, u = fx_ts_future_node
+        assert ts.nodes_time[u] == -2
+        ti = debug.ArgInfo(ts, show_progress=False)
+        assert ti.nodes_date[u] == np.datetime64("2020-02-15")
+
+    def test_arg_info_quick(self, fx_ts_future_node):
+        ts, _ = fx_ts_future_node
+        ti = debug.ArgInfo(ts, show_progress=False, quick=True)
+        assert ti.nodes_date is None
+
+    def test_samples_per_day_excludes_future(self, fx_ts_future_node):
+        ts, _ = fx_ts_future_node
+        ti = debug.ArgInfo(ts, show_progress=False)
+        assert np.sum(ti.num_samples_per_day) == ts.num_samples - 1
+
+    def test_summary_latest_sample(self, fx_ts_future_node):
+        ts, u = fx_ts_future_node
+        ti = debug.ArgInfo(ts, show_progress=False)
+        # The future node has a lower ID than later-added samples, so this is
+        # only right if we take the maximum over all sample dates.
+        assert u != ts.samples()[-1]
+        df = ti.summary()
+        assert df.loc["latest_sample"].value == np.datetime64("2020-02-15")
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            func
+            for (name, func) in inspect.getmembers(debug.ArgInfo)
+            if name.startswith("plot")
+        ],
+    )
+    def test_plots(self, fx_ts_future_node, method):
+        ts, _ = fx_ts_future_node
+        fig, axes = method(debug.ArgInfo(ts, show_progress=False))
+        assert isinstance(fig, matplotlib.figure.Figure)
+        for ax in axes:
+            assert isinstance(ax, matplotlib.axes.Axes)
 
 
 class TestSampleGroupInfo:

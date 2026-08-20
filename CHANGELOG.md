@@ -4,10 +4,20 @@
 
 In development
 
-- Seed samples listed in `include_samples` are now matched separately from the
-  daily samples, with recombination effectively disallowed. These samples are
-  usually far diverged from the current ARG, which previously led to spurious
-  recombinations.
+- Add `seed_groups`, replacing the previous `include_samples` option. It is a
+  list of seed *groups*, each a list of strain IDs that are inserted into the
+  ARG together as a single local tree. A tree is inferred over the group's
+  haplotypes, the haplotype of the group's inferred ancestor is matched against
+  the ARG, and the whole group is then attached at that placement. A group is
+  inserted on the minimum date over its members, and members with later dates
+  keep their real dates via negative ("in the future") node times. The previous
+  `include_samples` formats (bare strain IDs, or `(strain, match_date)` tuples)
+  are no longer supported.
+
+- Fix retrospective matching on a day with no new samples. The table of samples
+  already in the ARG was only rebuilt when there were samples to match, so on
+  such a day the retrospective query ran against the previous day's table and
+  could add a second copy of a sample that had just been inserted.
 
 - Add basic support for non-SARS-CoV-2 genomes via an optional reference FASTA.
   Supply `--reference` to `import-alignments` and a `reference_fasta` key in the
