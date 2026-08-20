@@ -549,10 +549,6 @@ def check_seed_groups(seed_groups, metadata):
     Each entry must be a non-empty list of strain IDs which are inserted into
     the ARG together as a single group. Every strain must be present in
     ``metadata``, and no strain may appear in more than one group.
-
-    A group is inserted on the minimum date over its members; members with
-    later dates keep their real dates and so get negative ("in the future")
-    node times.
     """
     groups = []
     seen = {}
@@ -921,6 +917,18 @@ def match_path_ts(group, sequence_length):
     """
     Given the specified SampleGroup return the tree sequence rooted at
     zero representing the data.
+
+    Each site's ancestral state is the ``inherited_state`` recorded by the HMM,
+    i.e. the allele of the path's parent over the segment covering that site.
+    Since the root carries no mutations it therefore has the haplotype implied
+    by the copying path, and ``tree_ops.infer_binary`` includes the root as an
+    outgroup taxon when building the group's tree. So there is no need to
+    compute ``path_haplotype`` here, as the seed group code must do when it
+    builds the equivalent tree from raw haplotypes with ``flat_group_ts``.
+
+    Only sites at which some member differs from the path are included. At any
+    other site every member and the root share an allele, so it can affect
+    neither the tree building nor the parsimony mutations placed afterwards.
     """
     tables = tskit.TableCollection(sequence_length)
     tables.nodes.metadata_schema = tskit.MetadataSchema.permissive_json()

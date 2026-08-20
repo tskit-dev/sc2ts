@@ -15,7 +15,7 @@ date_field="Date_tree"
 # reference_fasta="reference.fasta"
 # reference_date="1900-01-01"
 
-# The run_id is a prefix added to all output files. This is useful when 
+# The run_id is a prefix added to all output files. This is useful when
 # running lots of different parameter combinations.
 run_id="ex1"
 # Configure where the result files are stored. For simplicity
@@ -29,13 +29,13 @@ matches_dir= "example_inference/"
 # This is full debug output, which is verbose (but useful!)
 log_level = 2
 
-# Dates to exclude from inference. This one is a large outlier in the 
-# Viridian data in terms of the numbers of samples, and enriched for 
+# Dates to exclude from inference. This one is a large outlier in the
+# Viridian data in terms of the numbers of samples, and enriched for
 # incorrectly assigned dates.
 exclude_dates = ["2020-12-31"]
 
 # The set of site positions to mask during inference (list of integers).
-# Real inferences will almost certainly want to mask some sites, although 
+# Real inferences will almost certainly want to mask some sites, although
 # it's not clear which sites exactly.
 exclude_sites = []
 
@@ -93,7 +93,7 @@ memory_limit=32
 # later dates keep their real dates, and so are given negative ("in the
 # future") node times until their real date is reached.
 #
-#   seed_groups=[["BA.1_strain_a", "BA.1_strain_b"], ["BA.2_strain_c"]]
+#   seed_groups=[["BA.1_strain_a", "BA.1_strain_b", "BA.2_strain_a"], ["Delta_strain_a"]]
 seed_groups=[]
 
 # Override specific parameter values over a time period.
