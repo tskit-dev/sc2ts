@@ -1,7 +1,7 @@
 """
 Collection of debug utilities for inspecting the raw-output
 of sc2ts inference. These are developer tools and are only
-included if the "debug"] option is included with the sc2ts
+included if the "debug" option is included with the sc2ts
 install.
 """
 
@@ -112,7 +112,7 @@ class CopyingTable:
             dist_to_left = 0
         if dist_to_right > 2:
             dist_to_right = 0
-        return f'<td title="{pos}" "class="run-{int(dist_to_left)}-{int(dist_to_right)}"></td>'  # noqa E501
+        return f'<td title="{pos}" class="run-{int(dist_to_left)}-{int(dist_to_right)}"></td>'  # noqa E501
 
     def node_mutations(self):
         muts = {}
