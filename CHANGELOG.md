@@ -1,8 +1,8 @@
 # Changelog
 
-## [1.0.3] - 2026-XX-XX
+## [1.1.0] - 2026-10-08
 
-In development
+Feature release.
 
 - Add `seed_groups`, replacing the previous `include_samples` option. It is a
   list of seed *groups*, each a list of strain IDs that are inserted into the
