@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.1.1] - 202X-XX-XX
+
+In development.
+
 ## [1.1.0] - 2026-10-08
 
 Feature release.
