@@ -3142,13 +3142,17 @@ def push_up_unary_recombinant_mutations(ts):
     logger.info(f"Found {len(recomb_parent_edges)} edges with recombinant parent")
     for e in recomb_parent_edges:
         edge = ts.edge(e)
-        if edge.left == 0 and edge.right == ts.sequence_length:
-            by_parent[edge.parent].append(edge)
+        by_parent[edge.parent].append(edge)
 
-    # We're only interested in full-span edges with a single child.
-    child_to_parent = {
-        e[0].child: e[0].parent for e in by_parent.values() if len(e) == 1
-    }
+    # We're only interested in recombinants with a single full-span child edge.
+    # Note: we must count all child edges here, not just full-span ones, as
+    # otherwise mutations would be inherited by other (partial) children.
+    child_to_parent = {}
+    for edges in by_parent.values():
+        if len(edges) == 1:
+            edge = edges[0]
+            if edge.left == 0 and edge.right == ts.sequence_length:
+                child_to_parent[edge.child] = edge.parent
     logger.info(f"Of which {len(child_to_parent)} are unary")
     mutations_to_move = np.isin(
         ts.mutations_node, np.array(list(child_to_parent.keys()), dtype=np.int32)
