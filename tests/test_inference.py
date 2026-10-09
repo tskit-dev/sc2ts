@@ -3406,6 +3406,42 @@ class TestPushUpRecombinantMutations:
         mut = tsp.site(site).mutations[0]
         assert mut.node == 56
 
+    def recombinant_example(self, extra_partial_child):
+        # Root 0 with children 1 and 2. Recombinant node 3 inherits from
+        # 1 on [0, 5) and 2 on [5, 10). Sample 4 is a full-span child of 3
+        # carrying a mutation. Optionally, sample 5 is also a child of 3
+        # over [0, 5), so that 3 is not unary.
+        tables = tskit.TableCollection(10)
+        tables.nodes.add_row(time=4)
+        tables.nodes.add_row(time=3)
+        tables.nodes.add_row(time=3)
+        tables.nodes.add_row(flags=core.NODE_IS_RECOMBINANT, time=2)
+        tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)
+        tables.edges.add_row(0, 10, 0, 1)
+        tables.edges.add_row(0, 10, 0, 2)
+        tables.edges.add_row(0, 5, 1, 3)
+        tables.edges.add_row(5, 10, 2, 3)
+        tables.edges.add_row(0, 10, 3, 4)
+        if extra_partial_child:
+            tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0)
+            tables.edges.add_row(0, 5, 3, 5)
+        tables.sites.add_row(2, "A")
+        tables.mutations.add_row(site=0, node=4, derived_state="T", time=0)
+        tables.sort()
+        return tables.tree_sequence()
+
+    def test_unary_full_span_child(self):
+        ts = self.recombinant_example(extra_partial_child=False)
+        tsp = si.push_up_unary_recombinant_mutations(ts)
+        assert tsp.mutation(0).node == 3
+        assert tsp.mutation(0).time == 2
+        np.testing.assert_array_equal(ts.genotype_matrix(), tsp.genotype_matrix())
+
+    def test_full_span_child_with_partial_sibling(self):
+        ts = self.recombinant_example(extra_partial_child=True)
+        tsp = si.push_up_unary_recombinant_mutations(ts)
+        ts.tables.assert_equals(tsp.tables, ignore_provenance=True)
+
     def test_provenance(self, fx_ts_map):
         ts = fx_ts_map["2020-02-13"]
         tsp = si.push_up_unary_recombinant_mutations(ts)

@@ -4,8 +4,11 @@
 
 In development.
 
-- Add `--no-mutation-updates` option to `postprocess` to skip pushing up
-  unary recombinant mutations and reversions.
+- Fix `push_up_unary_recombinant_mutations` treating a recombinant node as
+  unary when it had one full-span child edge alongside other partial-span
+  child edges. Mutations were then pushed up onto the recombinant and
+  inherited by the other children, causing a `TSK_ERR_BAD_MUTATION_PARENT`
+  error in `postprocess`.
 
 ## [1.1.0] - 2026-10-08
 
