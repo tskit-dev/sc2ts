@@ -560,22 +560,6 @@ class TestPostprocess:
         # dated otherwise
         assert out.edge(-1).parent == 0
 
-    def test_no_mutation_updates(self, tmp_path, fx_ts_map, fx_match_db):
-        ts = fx_ts_map["2020-02-13"]
-        out_ts_path = tmp_path / "ts.ts"
-        runner = ct.CliRunner()
-        result = runner.invoke(
-            cli.cli,
-            f"postprocess {ts.path} {out_ts_path} --match-db={fx_match_db.path} "
-            "--no-mutation-updates",
-            catch_exceptions=False,
-        )
-        assert result.exit_code == 0
-        out = tskit.load(out_ts_path)
-        assert out.num_samples == ts.num_samples + 8
-        assert out.num_provenances == ts.num_provenances + 1
-        assert out.num_mutations == ts.num_mutations
-
 
 class TestMinimiseMetadata:
     def test_example(self, tmp_path, fx_ts_map):

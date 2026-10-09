@@ -4,9 +4,6 @@
 
 In development.
 
-- Add `--no-mutation-updates` option to `postprocess` to skip pushing up
-  unary recombinant mutations and reversions.
-
 - Fix `push_up_unary_recombinant_mutations` treating a recombinant node as
   unary when it had one full-span child edge alongside other partial-span
   child edges. Mutations were then pushed up onto the recombinant and

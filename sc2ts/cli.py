@@ -536,11 +536,6 @@ def run_hmm(
 @click.argument("ts_in", type=click.Path(exists=True, dir_okay=False))
 @click.argument("ts_out", type=click.Path(exists=False, dir_okay=False))
 @click.option("--match-db", type=click.Path(exists=True, dir_okay=False))
-@click.option(
-    "--mutation-updates/--no-mutation-updates",
-    default=True,
-    help="Push up unary recombinant mutations and simple reversions",
-)
 @click.option("--progress/--no-progress", default=True)
 @click.option("-v", "--verbose", count=True)
 @click.option("-l", "--log-file", default=None, type=click.Path(dir_okay=False))
@@ -548,7 +543,6 @@ def postprocess(
     ts_in,
     ts_out,
     match_db,
-    mutation_updates,
     progress,
     verbose,
     log_file,
@@ -562,13 +556,12 @@ def postprocess(
         with si.MatchDb(match_db) as db:
             ts = si.append_exact_matches(ts, db, show_progress=progress)
 
-    if mutation_updates:
-        ts = si.push_up_unary_recombinant_mutations(ts)
-        # See if we can remove some of the reversions in a straightforward way.
-        mutations_is_reversion = si.find_reversions(ts)
-        ts = tree_ops.push_up_reversions(
-            ts, ts.mutations_node[mutations_is_reversion], date=None
-        )
+    ts = si.push_up_unary_recombinant_mutations(ts)
+    # See if we can remove some of the reversions in a straightforward way.
+    mutations_is_reversion = si.find_reversions(ts)
+    ts = tree_ops.push_up_reversions(
+        ts, ts.mutations_node[mutations_is_reversion], date=None
+    )
     ts.dump(ts_out)
 
 
