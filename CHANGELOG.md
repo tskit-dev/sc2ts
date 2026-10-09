@@ -4,6 +4,9 @@
 
 In development.
 
+- Add `--no-mutation-updates` option to `postprocess` to skip pushing up
+  unary recombinant mutations and reversions.
+
 ## [1.1.0] - 2026-10-08
 
 Feature release.
