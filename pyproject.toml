@@ -51,7 +51,7 @@ test = [
   "pytest",
   "pytest-cov",
   "pytest-xdist",
-  "xarray",
+  "xarray<2026.9", # 2026.9 drops zarr-python 2 support; lift with zarr<3
   "tomli-w",
   # inference and debug deps needed by the test suite
   "scipy",
