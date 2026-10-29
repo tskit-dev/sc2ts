@@ -245,7 +245,7 @@ wheels = [
 
 [[package]]
 name = "biotite"
-version = "2.0.0"
+version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -263,24 +263,24 @@ dependencies = [
     { name = "packaging" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b4/92/d38007f947646f694caaa9a4176938920dee9ec601764ae3be1e8b604849/biotite-2.0.0.tar.gz", hash = "sha256:0adfb641b1b8879190c5f1e413ec2423cf6fcd7f0739ab62a8ddbca970aa753c", size = 40843411, upload-time = "2026-10-18T07:53:39.869Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/a3/f80315ca7e443e7d41d4eb9e9b101c4d3500dd8931c29fbac41d836d2ea6/biotite-1.8.0.tar.gz", hash = "sha256:7cef4a2a2acc142b9b3c10fe39070e6f4faa7bf65358ebf2bc05f1b0719a0c0b", size = 40881816, upload-time = "2026-10-16T10:46:03.001Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/30/6917930b80dee0c90dd561b7f1814d60a5342983988fb22d50ddb091b427/biotite-2.0.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:66941d10ebac2384bbd5385d1bf2eddfbec2c862c329c9ee609ecc2c54b1126b", size = 41866683, upload-time = "2026-10-18T07:52:51.253Z" },
-    { url = "https://files.pythonhosted.org/packages/82/e9/4045060d195992e06884e2bd284c32db00684113aadfd7bfac1453538c64/biotite-2.0.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:2521ac2762fded4b199725fbb27c16576a341a18be85ae6fcc6a09ea3783aa99", size = 41894731, upload-time = "2026-10-18T07:52:54.181Z" },
-    { url = "https://files.pythonhosted.org/packages/7a/ab/541fd1f6b46b3840d5835eac65066cfc2be6029373a094867caf22014632/biotite-2.0.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:653398e5d020561250cb71fb1860432ec99ae3707042fe649909d53abae5229d", size = 41997458, upload-time = "2026-10-18T07:52:57.699Z" },
-    { url = "https://files.pythonhosted.org/packages/7a/86/3a915d48de2e8e5d046da73a9ec2d600e0640f3814bd19a2962463f5f193/biotite-2.0.0-cp312-cp312-win_amd64.whl", hash = "sha256:df5e26b5fe09f420801ee302706f1370ebe3062e5bd05c58c3b18d1eb708f4cf", size = 41776665, upload-time = "2026-10-18T07:53:00.271Z" },
-    { url = "https://files.pythonhosted.org/packages/56/20/997439c1115790f285707f40177e3c79f537a5eae9a90c650049a7a03d87/biotite-2.0.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:cf73be4c7f8a6d54df92283d6bdfa42751d0a18d17e696cac9a0966427b9e814", size = 41867036, upload-time = "2026-10-18T07:53:03.393Z" },
-    { url = "https://files.pythonhosted.org/packages/db/27/748cfbab8404fcf60758f02df7f4d673f4e3b52e30f5a87cb43ab2dd180d/biotite-2.0.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:f85d945a78f1d08d04f95135c3263fc12862bf2e3277560f6d91243f07ba8bee", size = 41894314, upload-time = "2026-10-18T07:53:06.368Z" },
-    { url = "https://files.pythonhosted.org/packages/78/c6/d616e4914d048379e4d2277263ad3746ec689d8892c56320c8d44c50cfdc/biotite-2.0.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:8df3f6a357d74d34ec87a6090ae09a9a3afa1a742086fb0152db511260ec3e01", size = 41996725, upload-time = "2026-10-18T07:53:09.093Z" },
-    { url = "https://files.pythonhosted.org/packages/13/77/07809cc18dc90600544153f779a9aded4569181eca4cfa9c23e5b0ea8e5b/biotite-2.0.0-cp313-cp313-win_amd64.whl", hash = "sha256:f5f190db84da4cf6443f559a125bd8e002ea09c8d0817493bd344fe7935b4d51", size = 41781754, upload-time = "2026-10-18T07:53:12.538Z" },
-    { url = "https://files.pythonhosted.org/packages/46/a2/a23b96280251c0dbc27772ef2953160525df8e08d0d333ae0292d8157527/biotite-2.0.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:f853c6c9b5a4ffdbeff10d9a43edf881458fe415dfe4146065d0646f4b6436d3", size = 41866482, upload-time = "2026-10-18T07:53:15.677Z" },
-    { url = "https://files.pythonhosted.org/packages/b0/fa/9bd67e7f389c193a0bfdff4601360a057e147ded09b125422a863270311a/biotite-2.0.0-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:d88da6b9b418a598aaee12bc1be808ac0803d6374c3dd2223325598bc7dbbfea", size = 41895124, upload-time = "2026-10-18T07:53:19.184Z" },
-    { url = "https://files.pythonhosted.org/packages/3b/4c/4612522b75d4eb77c7f355074fed68af13b6219bca232bb6b0e2a4f15fba/biotite-2.0.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:36f8d3fb0f85691abe81e29a1f0af2c72d5bf29908b01c333d81fe4cecfc1a73", size = 41998491, upload-time = "2026-10-18T07:53:22.463Z" },
-    { url = "https://files.pythonhosted.org/packages/d3/13/a1e3b96637b9bd45c880d9023f5eda030e2a977a01e7162b5c1b9431ff51/biotite-2.0.0-cp314-cp314-win_amd64.whl", hash = "sha256:4fc0bd76ea728f1859a143ed99dd596281294af39f3d2bc6824fa49101bce17d", size = 41715469, upload-time = "2026-10-18T07:53:25.483Z" },
-    { url = "https://files.pythonhosted.org/packages/94/0e/dca472eceacaab1164d1b44c24424385ff699fbd61d2a35279574f757cd1/biotite-2.0.0-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:0f007f1a7f0b9754ec7bb5541038b0649021e5bed32c1d1e832a8667005d8982", size = 41866711, upload-time = "2026-10-18T07:53:28.262Z" },
-    { url = "https://files.pythonhosted.org/packages/34/92/06da5aa611d97d04f845388cc62560db9d45840bcaec8289b41b5124ea9d/biotite-2.0.0-cp315-cp315-manylinux_2_28_aarch64.whl", hash = "sha256:3b215c66a49ffc3475e7a01ae7962acb76110eae74121025806adf7c06f93ab9", size = 41894944, upload-time = "2026-10-18T07:53:30.975Z" },
-    { url = "https://files.pythonhosted.org/packages/c6/2e/bfea34ecf648cf8255832dade0fde4d03b7eb492bca7c37292e50953ad51/biotite-2.0.0-cp315-cp315-manylinux_2_28_x86_64.whl", hash = "sha256:a311aa731eaeea3d487717e29a80f494fd43721164e8d413cda100a0d4df2b86", size = 41998633, upload-time = "2026-10-18T07:53:33.866Z" },
-    { url = "https://files.pythonhosted.org/packages/26/f1/06060737de30a5cc104b73499d18ca26c8e1fd9c82560064679f8b9c4d94/biotite-2.0.0-cp315-cp315-win_amd64.whl", hash = "sha256:5f9163bc9aa3dcd1bb6d4b3e7ec140f6942cfde27f65b20e660545e2230d7749", size = 41715633, upload-time = "2026-10-18T07:53:36.689Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/39/7d63bc24e0300762241c070b2ecc4fd98054f8bdd0c691997cf3f28802ac/biotite-1.8.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:99a806321b5d043599c0cd88e00c68447699d554d31d5dd3b855d15c871f7e30", size = 43114410, upload-time = "2026-10-16T10:44:54.633Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/e3/2df860f046541b17d45d643f1e1e2fddc625f2d2b424d64b7923036e4f7d/biotite-1.8.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:6ec30437990db23f3c9f10296408effa81b885cc004a402bc87f86b4918a98dc", size = 45585580, upload-time = "2026-10-16T10:44:58.507Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/f4/4fb4082ee8ecb4b5b9dd77936bcc9f221c739d15f68d0ff95918e674e124/biotite-1.8.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:8dc766852f6eb2cc708da673f08d0de1991633247dbc82687617e148c67004e1", size = 45718188, upload-time = "2026-10-16T10:45:02.232Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/92/f614815c4f29a5d734a4c053bd580ba87be9ebaec65e1f2d209e5fa3eace/biotite-1.8.0-cp312-cp312-win_amd64.whl", hash = "sha256:98020a2b21840b9326389184dba0427096328aeaf5c2ab604c7cebe5c44f6e49", size = 42954920, upload-time = "2026-10-16T10:45:06.138Z" },
+    { url = "https://files.pythonhosted.org/packages/80/c8/7e1b31a3b84fb5fd42554119eec9f1a87e28208b5a65ef38d90970e96a95/biotite-1.8.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:ba68d41503b88e6c1bc5fce1742fb16673ecd98b6c796d53653e9d8a972da707", size = 43113042, upload-time = "2026-10-16T10:45:10.465Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/df/a1a670d8fbc0af7a16b43f45a1074432ead995f216bad133034cfeeb4bbf/biotite-1.8.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:d36f6e8502135905404bb34684e7ea570b8ab60bee30f147317ed51fcfb8356f", size = 45564291, upload-time = "2026-10-16T10:45:14.965Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/c5/86adb0b91269dc546bebdb8283c537723bd0eda78706b06093df39c53654/biotite-1.8.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:1623f50da60e537ba1cd7b1ee3db5c6aceac2037d5f9844f03ee79ce9a8d16e4", size = 45693376, upload-time = "2026-10-16T10:45:18.865Z" },
+    { url = "https://files.pythonhosted.org/packages/47/13/7f5ffeb6671fc0a0caf181ec9303c1e5760382b335eb5baff439c2983a50/biotite-1.8.0-cp313-cp313-win_amd64.whl", hash = "sha256:57b5e46e03f771610a45ed105ef44ec24e3c16b74ad62695ed71cceb2c9be373", size = 42952929, upload-time = "2026-10-16T10:45:23.07Z" },
+    { url = "https://files.pythonhosted.org/packages/01/72/766325f12899ad5cfc806160a5680512774c4fb4f1441e83e595e6038f59/biotite-1.8.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:26e70c8360f029d6510af34128446cffeba24d3c26d2e160b6b9a27714958d74", size = 43131407, upload-time = "2026-10-16T10:45:28.215Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/a0/b756aaeb4559004217ea7abc4c3ed20d417b4f5b5f6a1ea326e77652c154/biotite-1.8.0-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:cda585118e8df8d4247c1cbaedb8025b191f9b0ccd6d9f8805d47f4f2769be39", size = 45574808, upload-time = "2026-10-16T10:45:32.415Z" },
+    { url = "https://files.pythonhosted.org/packages/bd/8d/6eb0a09bd8519c85662b4b0b1ac4375af4fc20e7178dfdc00157a7b9e4d8/biotite-1.8.0-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:4f4a2e21f623c3eea9abd627587509b6078b9f954da6a934d79d97490af947ff", size = 45678488, upload-time = "2026-10-16T10:45:36.985Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/1d/ffcc4f6f072f3bfd6da5fddbced804a9a811733fa0f87628bbb50bede84f/biotite-1.8.0-cp314-cp314-win_amd64.whl", hash = "sha256:2e652ad63a00593cbf31b4ef953f821ac4bf7523f2197d2baf2afe0af4bda2ad", size = 42905144, upload-time = "2026-10-16T10:45:41.384Z" },
+    { url = "https://files.pythonhosted.org/packages/79/0e/228f80f118aef95f155a1c69b35cf1c78a7ba66623c94e12e36543bf828f/biotite-1.8.0-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:a25a3f1c591922edeca7d3a77baff216a7277cbe21b3da780fe427882626d16c", size = 43130479, upload-time = "2026-10-16T10:45:45.426Z" },
+    { url = "https://files.pythonhosted.org/packages/38/2e/272ef74455d9bf5ab03103c4f57381c1a7332855489bcccfdd946aa46232/biotite-1.8.0-cp315-cp315-manylinux_2_28_aarch64.whl", hash = "sha256:a40e45f268704204dd20282f1ede2418c7e5610f2c3b13c39ef642cef7b0d896", size = 45565017, upload-time = "2026-10-16T10:45:50.031Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/0c/7e976569f583655b1e0ffe4ffc709f7366ec4b1ef343a5ed4c643cbbc712/biotite-1.8.0-cp315-cp315-manylinux_2_28_x86_64.whl", hash = "sha256:4fbb590934257bfb0055174099d94806d2d8d09ebe9f355b465d8fb11433d1a4", size = 45696882, upload-time = "2026-10-16T10:45:54.536Z" },
+    { url = "https://files.pythonhosted.org/packages/68/0d/af49793495b579747ed914537fa82858106f081a12e578c181ed181e7f37/biotite-1.8.0-cp315-cp315-win_amd64.whl", hash = "sha256:eb36c17e4decc069d1ec89e432241a5b6468dcbe63df31b82f880e6cd1afd341", size = 42904498, upload-time = "2026-10-16T10:45:58.552Z" },
 ]
 
 [[package]]
@@ -3758,7 +3758,7 @@ debug = [
 ]
 inference = [
     { name = "biotite", version = "1.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "biotite", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "biotite", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "numba" },
     { name = "pyfaidx" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -3769,7 +3769,7 @@ inference = [
 [package.dev-dependencies]
 dev = [
     { name = "biotite", version = "1.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "biotite", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "biotite", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "ipython" },
     { name = "jupyter" },
     { name = "jupyter-book" },
@@ -3798,7 +3798,7 @@ dev = [
 ]
 docs = [
     { name = "biotite", version = "1.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "biotite", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "biotite", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "ipython" },
     { name = "jupyter-book" },
     { name = "numba" },
@@ -3823,7 +3823,7 @@ packaging = [
 ]
 test = [
     { name = "biotite", version = "1.6.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "biotite", version = "2.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "biotite", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "ipython" },
     { name = "matplotlib" },
     { name = "msprime" },
@@ -3841,7 +3841,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "biotite", marker = "extra == 'inference'" },
+    { name = "biotite", marker = "extra == 'inference'", specifier = "<2" },
     { name = "click", specifier = ">=8.2" },
     { name = "humanize" },
     { name = "ipython", marker = "extra == 'debug'" },
@@ -3861,7 +3861,7 @@ provides-extras = ["inference", "debug"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "biotite" },
+    { name = "biotite", specifier = "<2" },
     { name = "ipython" },
     { name = "jupyter" },
     { name = "jupyter-book", specifier = "<2" },
@@ -3889,7 +3889,7 @@ dev = [
     { name = "zizmor", specifier = "==1.26.1" },
 ]
 docs = [
-    { name = "biotite" },
+    { name = "biotite", specifier = "<2" },
     { name = "ipython" },
     { name = "jupyter-book", specifier = "<2" },
     { name = "numba" },
@@ -3912,7 +3912,7 @@ packaging = [
     { name = "validate-pyproject", extras = ["all"] },
 ]
 test = [
-    { name = "biotite" },
+    { name = "biotite", specifier = "<2" },
     { name = "ipython" },
     { name = "matplotlib" },
     { name = "msprime" },
