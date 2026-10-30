@@ -6,7 +6,7 @@ license = {file = "LICENSE"}
 authors = [
   {name = "Jerome Kelleher", email = "jerome.kelleher@bdi.ox.ac.uk"},
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
   "tskit>=1.0.0",
   "tszip",
@@ -118,7 +118,7 @@ local_scheme = "no-local-version"
 testpaths = "tests"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 89
 
 [tool.ruff.lint]
