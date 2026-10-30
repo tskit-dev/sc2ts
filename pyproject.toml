@@ -17,7 +17,8 @@ dependencies = [
   # as imported by the CLI
   "tomli",
   "humanize",
-  "zarr<3", # sc2ts uses the zarr v2 API
+  "zarr>=3.1",
+  "numcodecs",
 ]
 dynamic = ["version"]
 
@@ -51,7 +52,7 @@ test = [
   "pytest",
   "pytest-cov",
   "pytest-xdist",
-  "xarray<2026.9", # 2026.9 drops zarr-python 2 support; lift with zarr<3
+  "xarray",
   "tomli-w",
   # inference and debug deps needed by the test suite
   "scipy",
