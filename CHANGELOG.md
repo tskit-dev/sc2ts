@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.0] - 202X-XX-XX
+
+In development.
+
+Drops tsinfer dependency and uses tsls for HMM matching.
+
 ## [1.1.1] - 2026-10-30
 
 Maintenance release
