@@ -35,7 +35,7 @@ sc2ts = "sc2ts.cli:cli"
 [project.optional-dependencies]
 inference = [
   "scipy",
-  "biotite",
+  "biotite<2", # 2.0 replaces phylo.Tree with networkx graphs; tree_ops needs porting
   "tsinfer>=0.5,<1",
   "pyfaidx",
   "numba",
@@ -51,11 +51,11 @@ test = [
   "pytest",
   "pytest-cov",
   "pytest-xdist",
-  "xarray",
+  "xarray<2026.9", # 2026.9 drops zarr-python 2 support; lift with zarr<3
   "tomli-w",
   # inference and debug deps needed by the test suite
   "scipy",
-  "biotite",
+  "biotite<2", # 2.0 replaces phylo.Tree with networkx graphs; tree_ops needs porting
   "tsinfer>=0.5,<1",
   "pyfaidx",
   "numba",
@@ -72,7 +72,7 @@ docs = [
   "IPython",
   # docs require running the CLI, which means the full inference deps are needed
   "scipy",
-  "biotite",
+  "biotite<2", # 2.0 replaces phylo.Tree with networkx graphs; tree_ops needs porting
   "tsinfer>=0.5",
   "pyfaidx",
   "numba",
