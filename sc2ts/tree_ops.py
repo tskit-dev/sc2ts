@@ -661,8 +661,8 @@ def split_branch(ts, node, mutations):
 
 def drop_vestigial_root_edge(ts):
     """
-    Drop the edge joining 1 (the reference) to the vestigial root, needed
-    for matching in the tsinfer engine.
+    Drop the edge joining 1 (the reference) to the vestigial root, which
+    is added for matching.
     """
     if not (ts.edges_parent[-1] == 0 and ts.edges_child[-1] == 1):
         raise ValueError("Input does not have expected vestigial root edge")

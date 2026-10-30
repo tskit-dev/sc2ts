@@ -6,6 +6,11 @@ In development.
 
 Drops tsinfer dependency and uses tsls for HMM matching.
 
+- Match with the Li & Stephens HMM from the
+  [tsls](https://github.com/tskit-dev/tsls) package greatly reducing
+  the time and memory required for matching.
+
+
 ## [1.1.1] - 2026-10-30
 
 Maintenance release
