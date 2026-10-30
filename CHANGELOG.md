@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.2] - 2025-10-30
+## [1.1.2] - 2026-10-30
 
 Maintenance release
 
