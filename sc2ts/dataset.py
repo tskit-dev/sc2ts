@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_ZARR_COMPRESSOR = numcodecs.Blosc(cname="zstd", clevel=7, shuffle=0)
 
 
+def as_numpy(a):
+    """
+    Return the specified array read from Zarr, converting variable length
+    strings (which zarr-python 3 reads as numpy StringDType) to object arrays.
+    """
+    if a.dtype.kind == "T":
+        a = a.astype(object)
+    return a
+
+
 def decode_alleles(a):
     """
     Decode an array of integer-encoded alleles into their IUPAC string values
@@ -140,12 +150,12 @@ class CachedHaplotypeMapping(collections.abc.Mapping):
 class CachedMetadataMapping(collections.abc.Mapping):
     def __init__(self, root, sample_id_map, date_field, chunk_cache_size):
         self.sample_id_map = sample_id_map
-        self.sample_id = root["sample_id"][:].astype(str)
+        self.sample_id = as_numpy(root["sample_id"][:]).astype(str)
         self.sample_id_array = root["sample_id"]
         # Mapping of field name to Zarr array
         self.fields = {}
         prefix = "sample_"
-        for k, array in root.items():
+        for k, array in root.members():
             if k.startswith(prefix) and k != "sample_id":
                 name = k[len(prefix) :]
                 self.fields[name] = array
@@ -155,7 +165,7 @@ class CachedMetadataMapping(collections.abc.Mapping):
         logger.debug(f"Got {self.num_fields} metadata fields")
         self.date_field = date_field
         if date_field is not None:
-            self.sample_date = root[f"sample_{date_field}"][:].astype(str)
+            self.sample_date = as_numpy(root[f"sample_{date_field}"][:]).astype(str)
 
     @property
     def num_fields(self):
@@ -213,7 +223,7 @@ class CachedMetadataMapping(collections.abc.Mapping):
             fields = list(self.fields.keys())
         data = {"sample_id": self.sample_id}
         for k in fields:
-            data[k] = self.fields[k][:]
+            data[k] = as_numpy(self.fields[k][:])
         return pd.DataFrame(data).set_index("sample_id")
 
     def field_descriptors(self):
@@ -222,7 +232,7 @@ class CachedMetadataMapping(collections.abc.Mapping):
             data.append(
                 {
                     "field": k,
-                    "dtype": v.dtype,
+                    "dtype": np.dtype(object) if v.dtype.kind == "T" else v.dtype,
                     "description": v.attrs.get("description", ""),
                 }
             )
@@ -258,11 +268,11 @@ class Dataset(collections.abc.Mapping):
         self.date_field = date_field
         self.path = pathlib.Path(path)
         if self.path.suffix == ".zip":
-            self.store = zarr.ZipStore(path, mode="r")
+            self.store = zarr.storage.ZipStore(path, mode="r")
         else:
-            self.store = zarr.DirectoryStore(path)
-        self.root = zarr.open(self.store, mode="r")
-        self._sample_id = self.root["sample_id"][:].astype(str)
+            self.store = zarr.storage.LocalStore(path, read_only=True)
+        self.root = zarr.open_group(self.store, mode="r")
+        self._sample_id = as_numpy(self.root["sample_id"][:]).astype(str)
 
         # TODO we should be storing this mapping in the Zarr somehow.
         self.sample_id_map = {
@@ -340,7 +350,7 @@ class Dataset(collections.abc.Mapping):
         """
         Return the number of samples in this dataset.
         """
-        return self.root.call_genotype.shape[1]
+        return self.root["call_genotype"].shape[1]
 
     @property
     def num_variants(self):
@@ -349,7 +359,7 @@ class Dataset(collections.abc.Mapping):
         there's necessarily variation at each site; the terminology is borrowed from
         VCF Zarr.
         """
-        return self.root.call_genotype.shape[0]
+        return self.root["call_genotype"].shape[0]
 
     def __str__(self):
         return (
@@ -377,7 +387,7 @@ class Dataset(collections.abc.Mapping):
         :rtype: collections.abc.Iterator
         """
         variant_position = self["variant_position"][:]
-        variant_alleles = self["variant_allele"][:]
+        variant_alleles = as_numpy(self["variant_allele"][:])
         call_genotype = self["call_genotype"]
         if sample_id is None:
             sample_id = self.sample_id
@@ -391,21 +401,22 @@ class Dataset(collections.abc.Mapping):
         if not np.all(variant_position[index] == position):
             raise ValueError("Unknown position")
         v_chunk_size = call_genotype.chunks[0]
-        variant_select = zarr.zeros(
-            shape=variant_position.shape, chunks=v_chunk_size, dtype=bool
-        )
+        variant_select = np.zeros(variant_position.shape, dtype=bool)
         variant_select[index] = True
+
+        def chunk_select(v_chunk):
+            start = v_chunk * v_chunk_size
+            return variant_select[start : start + v_chunk_size]
 
         v_chunks = []
         for v_chunk in range(call_genotype.cdata_shape[0]):
             # NOTE: could improve performance quite a lot for small sample
             # sets by pulling only S chunks that are needed.
-            v_select = variant_select.blocks[v_chunk]
-            if np.any(v_select):
+            if np.any(chunk_select(v_chunk)):
                 v_chunks.append(v_chunk)
 
         for v_chunk, G in readahead_retrieve(call_genotype, v_chunks):
-            v_select = variant_select.blocks[v_chunk]
+            v_select = chunk_select(v_chunk)
             for k in range(G.shape[0]):
                 if v_select[k]:
                     j = v_chunk * v_chunk_size + k
@@ -443,7 +454,7 @@ class Dataset(collections.abc.Mapping):
         if variants_chunk_size is None:
             variants_chunk_size = self.variants_chunk_size
         if sample_id is None:
-            sample_id = self["sample_id"][:]
+            sample_id = as_numpy(self["sample_id"][:])
         Dataset.new(
             path,
             sequence_length=int(self["contig_length"][0]),
@@ -464,7 +475,7 @@ class Dataset(collections.abc.Mapping):
         Dataset.add_metadata(path, df)
 
     def reorder(self, path, additional_fields=list(), show_progress=False):
-        sample_id = self.metadata.sample_id_array[:]
+        sample_id = as_numpy(self.metadata.sample_id_array[:])
         sort_key = [self.date_field] + list(additional_fields)
         logger.info(f"Reorder sort key = {sort_key})")
         index = np.lexsort([self.metadata.fields[f] for f in sort_key[::-1]])
@@ -487,95 +498,99 @@ class Dataset(collections.abc.Mapping):
         logger.info(f"Creating new dataset at {path}")
         L = sequence_length - 1
         N = 0  # Samples must be added
-        store = zarr.DirectoryStore(path)
-        root = zarr.open(store, mode="w")
+        root = zarr.open_group(path, mode="w", zarr_format=2)
 
-        z = root.empty(
+        z = root.create_array(
             "variant_position",
             shape=(L),
             chunks=(variants_chunk_size),
             dtype=np.int32,
-            compressor=DEFAULT_ZARR_COMPRESSOR,
+            compressors=DEFAULT_ZARR_COMPRESSOR,
+            fill_value=None,
         )
         z[:] = np.arange(1, L + 1)
         z.attrs["_ARRAY_DIMENSIONS"] = ["variants"]
 
-        z = root.empty(
+        z = root.create_array(
             name="variant_allele",
-            dtype="O",
+            dtype=str,
             shape=(L, len(core.IUPAC_ALLELES)),
             chunks=(variants_chunk_size, len(core.IUPAC_ALLELES)),
-            object_codec=numcodecs.VLenUTF8(),
-            compressor=DEFAULT_ZARR_COMPRESSOR,
+            compressors=DEFAULT_ZARR_COMPRESSOR,
+            fill_value=None,
         )
         z[:] = np.tile(tuple(core.IUPAC_ALLELES), L).reshape(L, len(core.IUPAC_ALLELES))
         z.attrs["_ARRAY_DIMENSIONS"] = ["variants", "alleles"]
 
-        z = root.empty(
+        z = root.create_array(
             "contig_id",
             shape=1,
-            dtype="str",
-            compressor=DEFAULT_ZARR_COMPRESSOR,
+            dtype=str,
+            compressors=DEFAULT_ZARR_COMPRESSOR,
+            fill_value=None,
         )
         z[0] = contig_id
         z.attrs["_ARRAY_DIMENSIONS"] = ["contigs"]
 
-        z = root.empty(
+        z = root.create_array(
             "contig_length",
             shape=1,
             dtype=np.int64,
-            compressor=DEFAULT_ZARR_COMPRESSOR,
+            compressors=DEFAULT_ZARR_COMPRESSOR,
+            fill_value=None,
         )
         z[0] = L + 1
         z.attrs["_ARRAY_DIMENSIONS"] = ["contigs"]
 
-        z = root.empty(
+        z = root.create_array(
             "variant_contig",
             shape=(L),
             chunks=variants_chunk_size,
             dtype=np.int8,
-            compressor=DEFAULT_ZARR_COMPRESSOR,
+            compressors=DEFAULT_ZARR_COMPRESSOR,
+            fill_value=None,
         )
         z[:] = 0
         z.attrs["_ARRAY_DIMENSIONS"] = ["variants"]
 
-        z = root.empty(
+        z = root.create_array(
             "sample_id",
-            dtype="str",
-            compressor=DEFAULT_ZARR_COMPRESSOR,
+            dtype=str,
+            compressors=DEFAULT_ZARR_COMPRESSOR,
+            fill_value=None,
             shape=(N,),
             chunks=(samples_chunk_size,),
         )
         z.attrs["_ARRAY_DIMENSIONS"] = ["samples"]
 
         shape = (L, N)
-        z = root.empty(
+        z = root.create_array(
             "call_genotype",
             shape=(L, N, 1),
-            chunks=(variants_chunk_size, samples_chunk_size),
+            chunks=(variants_chunk_size, samples_chunk_size, 1),
             dtype=np.int8,
-            compressor=numcodecs.Blosc(
+            compressors=numcodecs.Blosc(
                 cname="zstd", clevel=7, shuffle=numcodecs.Blosc.BITSHUFFLE
             ),
-            dimension_separator="/",
+            fill_value=None,
+            chunk_key_encoding={"name": "v2", "separator": "/"},
         )
         z.attrs["_ARRAY_DIMENSIONS"] = ["variants", "samples", "ploidy"]
 
-        zarr.consolidate_metadata(store)
+        zarr.consolidate_metadata(path)
 
     @staticmethod
     def append_alignments(path, alignments):
         if len(alignments) == 0:
             return
-        store = zarr.DirectoryStore(path)
-        root = zarr.open(store, mode="a")
+        root = zarr.open_group(path, mode="r+", use_consolidated=False)
 
         n = len(alignments)
         gt_array = root["call_genotype"]
         sample_id_array = root["sample_id"]
         L, N = gt_array.shape[:2]
         logger.info(f"Appending {len(alignments)} alignments to store with {N}")
-        if len(set(sample_id_array[:]) & set(alignments.keys())) > 0:
+        if len(set(as_numpy(sample_id_array[:])) & set(alignments.keys())) > 0:
             raise ValueError("Attempting to add duplicate samples")
 
         G = np.zeros((L, n, 1), dtype=np.int8)
@@ -587,15 +602,14 @@ class Dataset(collections.abc.Mapping):
         sample_id_array.append(sample_id)
         gt_array.append(G, axis=1)
 
-        zarr.consolidate_metadata(store)
+        zarr.consolidate_metadata(path)
 
     @staticmethod
     def add_metadata(path, df, field_descriptions=dict()):
-        store = zarr.DirectoryStore(path)
-        root = zarr.open(store, mode="a")
+        root = zarr.open_group(path, mode="r+", use_consolidated=False)
 
         sample_id_array = root["sample_id"]
-        samples = sample_id_array[:]
+        samples = as_numpy(sample_id_array[:])
         if samples.shape[0] == 0:
             raise ValueError("Cannot add metadata to empty dataset")
         df = df.loc[samples].copy()
@@ -611,11 +625,12 @@ class Dataset(collections.abc.Mapping):
                 else:
                     dtype = "i4"
             elif dtype != bool:
-                dtype = "str"
-            z = root.empty(
+                dtype = str
+            z = root.create_array(
                 f"sample_{colname}",
                 dtype=dtype,
-                compressor=sample_id_array.compressor,
+                compressors=sample_id_array.compressors,
+                fill_value=None,
                 shape=sample_id_array.shape,
                 chunks=sample_id_array.chunks,
                 overwrite=True,
@@ -626,7 +641,7 @@ class Dataset(collections.abc.Mapping):
             z[:] = data
             logger.info(f"Wrote metadata array {z.name}")
 
-        zarr.consolidate_metadata(store)
+        zarr.consolidate_metadata(path)
 
     @staticmethod
     def create_zip(in_path, out_path):

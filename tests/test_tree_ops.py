@@ -831,7 +831,7 @@ class TestFromBiotite:
     def check_round_trip(self, tsk_tree):
         node_labels = {u: f"{u}" for u in tsk_tree.tree_sequence.samples()}
         nwk = tsk_tree.as_newick(node_labels=node_labels)
-        biotite_tree = bsp.Tree.from_newick(nwk)
+        biotite_tree = bsp.from_newick(nwk)
         converted = tree_ops.biotite_to_tskit(biotite_tree)
         assert converted.tree_sequence.num_trees == 1
         assert converted.rank() == tsk_tree.rank()

@@ -6,7 +6,7 @@ license = {file = "LICENSE"}
 authors = [
   {name = "Jerome Kelleher", email = "jerome.kelleher@bdi.ox.ac.uk"},
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
   "tskit>=1.0.0",
   "tszip",
@@ -17,7 +17,8 @@ dependencies = [
   # as imported by the CLI
   "tomli",
   "humanize",
-  "zarr<3", # sc2ts uses the zarr v2 API
+  "zarr>=3.1",
+  "numcodecs",
 ]
 dynamic = ["version"]
 
@@ -35,7 +36,7 @@ sc2ts = "sc2ts.cli:cli"
 [project.optional-dependencies]
 inference = [
   "scipy",
-  "biotite<2", # 2.0 replaces phylo.Tree with networkx graphs; tree_ops needs porting
+  "biotite>=2",
   "tsls",
   "pyfaidx",
   "numba",
@@ -51,11 +52,11 @@ test = [
   "pytest",
   "pytest-cov",
   "pytest-xdist",
-  "xarray<2026.9", # 2026.9 drops zarr-python 2 support; lift with zarr<3
+  "xarray",
   "tomli-w",
   # inference and debug deps needed by the test suite
   "scipy",
-  "biotite<2", # 2.0 replaces phylo.Tree with networkx graphs; tree_ops needs porting
+  "biotite>=2",
   "tsls",
   "pyfaidx",
   "numba",
@@ -72,7 +73,7 @@ docs = [
   "IPython",
   # docs require running the CLI, which means the full inference deps are needed
   "scipy",
-  "biotite<2", # 2.0 replaces phylo.Tree with networkx graphs; tree_ops needs porting
+  "biotite>=2",
   "tsls",
   "pyfaidx",
   "numba",
@@ -118,7 +119,7 @@ local_scheme = "no-local-version"
 testpaths = "tests"
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 89
 
 [tool.ruff.lint]

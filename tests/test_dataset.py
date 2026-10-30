@@ -1,18 +1,22 @@
 import itertools
+import pathlib
 
 import numpy as np
 import numpy.testing as nt
 import pytest
 import xarray as xr
 import xarray.testing as xt
+import zarr
 
 import sc2ts
 from sc2ts import data_import, jit
 
 
 # Partial copy of the load_dataset function.
-def load_dataset(store):
-    ds = xr.open_zarr(store, concat_characters=False)
+def load_dataset(path):
+    if pathlib.Path(path).suffix == ".zip":
+        path = zarr.storage.ZipStore(path, mode="r")
+    ds = xr.open_zarr(path, concat_characters=False)
     return ds
 
 

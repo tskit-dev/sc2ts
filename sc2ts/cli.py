@@ -271,7 +271,8 @@ def info_dataset(dataset, verbose, zarr_details):
     ds = sc2ts.Dataset(dataset)
     print(ds)
     if zarr_details:
-        for array in ds.root.values():
+        for name, array in ds.root.members():
+            print(f"/{name}")
             print(str(array.info).strip())
             print("----")
 
