@@ -10,6 +10,17 @@ Drops tsinfer dependency and uses tsls for HMM matching.
   [tsls](https://github.com/tskit-dev/tsls) package greatly reducing
   the time and memory required for matching.
 
+Maintenance:
+
+- Require Python >= 3.12 and add support for Python 3.15.
+
+- Require zarr >= 3.1. Datasets are still written in Zarr format 2, so
+  existing datasets can be read and updated as before. Note that string
+  arrays accessed directly through `Dataset` mapping (e.g. `ds["sample_id"][:]`)
+  are now returned as numpy `StringDType` arrays.
+
+- Require biotite >= 2.
+
 
 ## [1.1.1] - 2026-10-30
 
