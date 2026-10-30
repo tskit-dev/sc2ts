@@ -79,9 +79,9 @@ def hmm_parameters(ts, num_mismatches, deletions_as_missing=False):
     """
     num_alleles = 4 if deletions_as_missing else 5
     mu, rho = si.solve_num_mismatches(num_mismatches, num_alleles)
-    recombination = tsls.model.recombination_probability(rho, ts.num_nodes)
-    odds = tsls.model.mismatch_odds(mu, num_alleles)
-    mismatch = tsls.model.mismatch_probability(odds, 5)
+    recombination = tsls.recombination_probability(rho, ts.num_nodes)
+    odds = tsls.mismatch_odds(mu, num_alleles)
+    mismatch = tsls.mismatch_probability(odds, 5)
     return float(recombination), float(mismatch)
 
 
@@ -339,7 +339,7 @@ class TestCostThreshold:
         ts = panel_ts(3)
         k = 3
         recombination, mismatch = hmm_parameters(ts, k)
-        e = tsls.model.mismatch_odds(mismatch, 5)
+        e = tsls.mismatch_odds(mismatch, 5)
         t = si.cost_threshold(2, k, mismatch, recombination, ts.num_nodes)
         assert t == pytest.approx(e**2)
         t = si.cost_threshold(4, k, mismatch, recombination, ts.num_nodes)

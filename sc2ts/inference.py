@@ -1690,13 +1690,13 @@ def cost_threshold(max_cost, num_mismatches, mismatch, recombination, num_nodes)
     Return the Viterbi prune threshold that finds the optimal path whenever
     it costs at most max_cost, where a recombination costs num_mismatches
     mismatches. The returned path is then optimal if it costs at most
-    max_cost (see tsls.model.path_threshold).
+    max_cost (see tsls.path_threshold).
     """
     thresholds = []
     num_switches = 0
     while num_switches * num_mismatches <= max_cost:
         thresholds.append(
-            tsls.model.path_threshold(
+            tsls.path_threshold(
                 math.floor(max_cost - num_switches * num_mismatches),
                 mismatch,
                 len(HMM_ALLELES),
@@ -1888,12 +1888,12 @@ def match_tsls(
 
     # tsls divides the recombination probability between the nodes, and
     # sc2ts's rho is the odds of switching to a given node.
-    recombination = float(tsls.model.recombination_probability(rho, ts.num_nodes))
+    recombination = float(tsls.recombination_probability(rho, ts.num_nodes))
     # With deletions as missing data we match with 4 alleles, but deletions
     # are still in the tree sequence, so we give the mismatch probability
     # with the same odds for the HMM's 5 alleles.
-    odds = tsls.model.mismatch_odds(mu, num_alleles)
-    mismatch = float(tsls.model.mismatch_probability(odds, len(HMM_ALLELES)))
+    odds = tsls.mismatch_odds(mu, num_alleles)
+    mismatch = float(tsls.mismatch_probability(odds, len(HMM_ALLELES)))
 
     work = []
     for sample in samples:
