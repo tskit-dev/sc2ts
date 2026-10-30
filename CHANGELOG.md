@@ -1,8 +1,10 @@
 # Changelog
 
-## [1.1.1] - 202X-XX-XX
+## [1.1.2] - 2025-10-30
 
-In development.
+Maintenance release
+
+- Pin to biotite<2, as biotite 2 is not compatible with current sc2ts code.
 
 - Fix `push_up_unary_recombinant_mutations` treating a recombinant node as
   unary when it had one full-span child edge alongside other partial-span
