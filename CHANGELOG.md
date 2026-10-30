@@ -6,19 +6,16 @@ In development.
 
 Drops tsinfer dependency and uses tsls for HMM matching.
 
+- Match with the Li & Stephens HMM from the
+  [tsls](https://github.com/tskit-dev/tsls) package greatly reducing
+  the time and memory required for matching.
+
+
 ## [1.1.1] - 2026-10-30
 
 Maintenance release
 
 - Pin to biotite<2, as biotite 2 is not compatible with current sc2ts code.
-
-- Match with the Li & Stephens HMM from the
-  [tsls](https://github.com/tskit-dev/tsls) package, rather than tsinfer,
-  which is no longer a dependency. Matches are the same apart from ties
-  between equally likely paths, and the likelihood thresholds of the
-  matching passes are exact: a match found within a pass's cost bound is
-  guaranteed to be optimal. Breakpoint intervals of recombinants no longer
-  assume the breakpoint is at a site where the parents differ.
 
 - Fix `push_up_unary_recombinant_mutations` treating a recombinant node as
   unary when it had one full-span child edge alongside other partial-span
