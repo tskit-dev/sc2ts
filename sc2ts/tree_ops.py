@@ -79,7 +79,7 @@ def biotite_to_tskit(tree):
     This is just a wrapper to facilitate testing.
     """
     tables = tskit.TableCollection(1)
-    for node in tree.leaves:
+    for _ in bsp.get_leaves(tree):
         tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE)
     biotite_to_tskit_tables(tree, tables)
     return tables.tree_sequence().first()
@@ -117,24 +117,20 @@ def set_tree_time(tables, unit_scale=False):
 
 
 def biotite_to_oriented_forest(tree):
-    node_map = {}
-    for u, node in enumerate(tree.leaves):
-        node_map[node] = u
-        assert u == node.get_indices()[0]
-    n = len(node_map)
-    pi = [-1] * n
-
-    stack = [tree.root]
-    while len(stack) > 0:
-        node = stack.pop()
-        if not node.is_leaf():
-            assert node not in node_map
-            node_map[node] = len(pi)
-            pi.append(-1)
-            for child in node.children:
-                stack.append(child)
-        if node.parent is not None:
-            pi[node_map[node]] = node_map[node.parent]
+    """
+    Returns the parent array and number of leaves for the specified biotite
+    tree. Biotite trees are networkx DiGraphs with edges pointing from parent
+    to child, where the leaves are 0 to n - 1 and the internal nodes are
+    numbered from n upwards.
+    """
+    leaves = bsp.get_leaves(tree)
+    n = len(leaves)
+    num_nodes = tree.number_of_nodes()
+    assert sorted(leaves) == list(range(n))
+    assert sorted(tree.nodes) == list(range(num_nodes))
+    pi = [-1] * num_nodes
+    for parent, child in tree.edges():
+        pi[child] = parent
     return pi, n
 
 
