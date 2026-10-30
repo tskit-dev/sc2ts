@@ -8,6 +8,7 @@ import hashlib
 import inspect
 import json
 import logging
+import math
 import os
 import pathlib
 import pickle
@@ -16,13 +17,12 @@ import sqlite3
 import threading
 import time
 
-import _tsinfer
 import humanize
 import numpy as np
 import pandas as pd
 import tqdm
-import tsinfer
 import tskit
+import tsls
 import tszip
 
 from . import core, jit, stats, tree_ops
@@ -48,7 +48,7 @@ def get_provenance_dict(command, args, start_time):
         "software": {"name": "sc2ts", "version": core.__version__},
         "parameters": {"command": command, **args},
         "environment": tskit.provenance.get_environment(
-            extra_libs={"tsinfer": {"version": tsinfer.__version__}}
+            extra_libs={"tsls": {"version": tsls.__version__}}
         ),
         "resources": tskit.provenance.get_resources(start_time),
     }
@@ -323,8 +323,8 @@ def initial_ts(
                 metadata={"sc2ts": {"missing_samples": 0, "deletion_samples": 0}},
             )
     # TODO should probably make the ultimate ancestor time something less
-    # plausible or at least configurable. However, this will be removed
-    # in later versions when we remove the dependence on tsinfer.
+    # plausible or at least configurable. The vestigial root is a remnant of
+    # the tsinfer engine, which never copied node 0.
     tables.nodes.add_row(
         time=1,
         metadata={
@@ -342,7 +342,7 @@ def initial_ts(
         },
     )
     # NOTE: we don't actually need to store this edge, we could include it
-    # at the point where we call the low-level match_tsinfer operations.
+    # at the point where we call the low-level match_tsls operations.
     tables.edges.add_row(0, L, 0, 1)
     return tables.tree_sequence()
 
@@ -412,11 +412,13 @@ def match_samples(
 
     for k in range(2):
         logger.info(f"Running match={k} batch of {len(run_batch)}")
-        match_tsinfer(
+        # Matches costing at most k + 1 are guaranteed to be optimal, and
+        # are final.
+        match_tsls(
             samples=run_batch,
             ts=base_ts,
             num_mismatches=num_mismatches,
-            mismatch_threshold=k,
+            mismatch_threshold=k + 1,
             deletions_as_missing=deletions_as_missing,
             num_threads=num_threads,
             memory_limit=memory_limit,
@@ -456,7 +458,7 @@ def match_samples(
         run_batch = start_batch + rest
 
     logger.info(f"Running final batch of {len(run_batch)} at high precision")
-    match_tsinfer(
+    match_tsls(
         samples=run_batch,
         ts=base_ts,
         num_mismatches=num_mismatches,
@@ -1628,64 +1630,88 @@ def delete_immediate_reversion_nodes(ts, attach_nodes):
     return tables.tree_sequence()
 
 
-def make_tsb(ts, num_alleles, mirror_coordinates=False):
+# The alleles of the HMM, whose indexes are the codes in core.IUPAC_ALLELES.
+# Haplotypes are masked so that they only have these alleles, or are missing.
+HMM_ALLELES = list(core.IUPAC_ALLELES[:5])
+assert HMM_ALLELES == ["A", "C", "G", "T", "-"]
+
+
+def check_vestigial_root(ts):
+    """
+    Raise a ValueError unless node 0 of the specified tree sequence is the
+    vestigial root: its only child is node 1 (the reference), over the
+    whole sequence, and neither has mutations. Node 0 then has the same
+    likelihood as node 1 everywhere, so that copying node 1 wherever tsls
+    copies node 0 gives a path with the same likelihood.
+    """
+    node0_edges = ts.edges_parent == 0
+    if (
+        np.sum(node0_edges) != 1
+        or ts.edges_child[node0_edges][0] != 1
+        or ts.edges_left[node0_edges][0] != 0
+        or ts.edges_right[node0_edges][0] != ts.sequence_length
+        or np.any(ts.edges_child == 0)
+        or np.any(ts.mutations_node <= 1)
+    ):
+        raise ValueError(
+            "Matching requires node 0 to be the vestigial root, with node 1 as "
+            "its only child, and no mutations on either node"
+        )
+
+
+def copy_node1_for_node0(left, right, parent):
+    """
+    Return the copying path (left, right, parent), in right-to-left order
+    as tsls returns it, with node 1 copied wherever node 0 is, merging
+    adjacent segments that then have the same parent.
+    """
+    parent = np.where(parent == 0, 1, parent)
+    is_run_start = np.ones(len(parent), dtype=bool)
+    is_run_start[1:] = parent[1:] != parent[:-1]
+    is_run_end = np.ones(len(parent), dtype=bool)
+    is_run_end[:-1] = parent[:-1] != parent[1:]
+    return left[is_run_end], right[is_run_start], parent[is_run_start]
+
+
+def make_hmm_tree_sequence(ts, mirror_coordinates=False):
+    """
+    Return the tsls.TreeSequence to match against the specified tree
+    sequence, with its coordinates mirrored if specified.
+    """
     if mirror_coordinates:
-        # TODO inline this conversion here because we're doing an additional
-        # sort
         ts = mirror_ts_coordinates(ts)
-
-    # Note: this is inefficient here as we're rebuilding indexes etc for no
-    # real reason. Could inline here if we want.
     ts = tree_ops.insert_vestigial_root_edge(ts)
+    check_vestigial_root(ts)
+    return tsls.TreeSequence(ts, alleles=HMM_ALLELES)
 
-    # Convert arrays for numba compatibility
-    ancestral_state = jit.encode_alleles(
-        np.asarray(ts.sites_ancestral_state, dtype="U1")
-    )
-    derived_state = jit.encode_alleles(
-        np.asarray(ts.mutations_derived_state, dtype="U1")
-    )
 
-    tsb = _tsinfer.TreeSequenceBuilder(
-        num_alleles=np.full(ts.num_sites, num_alleles, dtype=np.uint64),
-        max_nodes=ts.num_nodes,
-        max_edges=ts.num_edges,
-        ancestral_state=ancestral_state,
-    )
-
-    position_map = np.hstack([ts.sites_position, [ts.sequence_length]])
-    # bracketing by 0 on the left here while we're translating edge locations.
-    position_map[0] = 0
-    # Get the indexes into the position array.
-    left = np.searchsorted(position_map, ts.edges_left)
-    if np.any(position_map[left] != ts.edges_left):
-        raise ValueError("Invalid left coordinates")
-    right = np.searchsorted(position_map, ts.edges_right)
-    if np.any(position_map[right] != ts.edges_right):
-        raise ValueError("Invalid right coordinates")
-
-    position_map[0] = ts.sites_position[0]
-    # Need to sort by child ID here and left so that we can efficiently
-    # insert the child paths.
-    index = np.lexsort((left, ts.edges_child))
-    tsb.restore_nodes(ts.nodes_time, ts.nodes_flags)
-    tsb.restore_edges(
-        left[index].astype(np.int32),
-        right[index].astype(np.int32),
-        ts.edges_parent[index],
-        ts.edges_child[index],
-    )
-    # assert tsb.num_match_nodes == ts.num_nodes
-
-    tsb.restore_mutations(
-        ts.mutations_site, ts.mutations_node, derived_state, ts.mutations_parent
-    )
-    return tsb, position_map.astype(int)
+def cost_threshold(max_cost, num_mismatches, mismatch, recombination, num_nodes):
+    """
+    Return the Viterbi prune threshold that finds the optimal path whenever
+    it costs at most max_cost, where a recombination costs num_mismatches
+    mismatches. The returned path is then optimal if it costs at most
+    max_cost (see tsls.model.path_threshold).
+    """
+    thresholds = []
+    num_switches = 0
+    while num_switches * num_mismatches <= max_cost:
+        thresholds.append(
+            tsls.model.path_threshold(
+                math.floor(max_cost - num_switches * num_mismatches),
+                mismatch,
+                len(HMM_ALLELES),
+                num_switches=num_switches,
+                recombination=recombination,
+                num_nodes=num_nodes,
+            )
+        )
+        num_switches += 1
+    return min(thresholds)
 
 
 class MatchingManager:
-    def __init__(self, tsb, work, num_threads, progress_bar, memory_limit):
-        self.tsb = tsb
+    def __init__(self, hmm_ts, work, num_threads, progress_bar, memory_limit):
+        self.hmm_ts = hmm_ts
         if num_threads < 0:
             num_threads = os.cpu_count()
         logger.debug(f"Matching with {num_threads} threads")
@@ -1725,12 +1751,11 @@ class MatchingManager:
 
         h = work.haplotype
         num_sites = len(h)
-        matcher = _tsinfer.AncestorMatcher(
-            self.tsb,
-            recombination=np.full(num_sites, work.rho),
-            mismatch=np.full(num_sites, work.mu),
-            likelihood_threshold=work.likelihood_threshold,
-            weight_by_n=False,
+        matcher = tsls.Hmm(
+            self.hmm_ts,
+            recombination=np.full(num_sites, work.recombination),
+            mismatch=np.full(num_sites, work.mismatch),
+            prune_threshold=work.prune_threshold,
         )
         with self.matchers_lock:
             assert self.matchers[thread_index] is None
@@ -1742,6 +1767,7 @@ class MatchingManager:
         before = time.thread_time()
         match_path = matcher.find_path(h, 0, num_sites, m)
         duration = time.thread_time() - before
+        match_path = copy_node1_for_node0(*match_path)
 
         path = []
         for left, right, parent in zip(*match_path):
@@ -1768,7 +1794,7 @@ class MatchingManager:
 
         logger.debug(
             f"Found path len={path_len} and muts={num_muts} L={likelihood:.2g} "
-            f"(L_t={work.likelihood_threshold:.2g}) "
+            f"(prune_threshold={work.prune_threshold:.2g}) "
             f"for {work.strain} in {duration:.3f}s "
             f"mean_tb_size={matcher.mean_traceback_size:.1f} "
             f"match_mem={humanize.naturalsize(matcher.total_memory, binary=True)}"
@@ -1815,15 +1841,23 @@ class MatchingManager:
 
 @dataclasses.dataclass(frozen=True)
 class MatchWork:
+    """
+    A haplotype to match. mu and rho are sc2ts's parameters, for which a
+    recombination costs num_mismatches mismatches, and recombination and
+    mismatch are the equivalent probabilities for tsls.
+    """
+
     strain: str
     haplotype: List
     num_mismatches: int
     mu: float
     rho: float
-    likelihood_threshold: float
+    recombination: float
+    mismatch: float
+    prune_threshold: float
 
 
-def match_tsinfer(
+def match_tsls(
     samples,
     ts,
     *,
@@ -1837,14 +1871,29 @@ def match_tsinfer(
     progress_phase=None,
     mirror_coordinates=False,
 ):
-
+    """
+    Match the specified samples against the tree sequence with the tsls
+    HMM, setting their hmm_match. A recombination costs num_mismatches
+    mismatches. If mismatch_threshold is specified, the match is guaranteed
+    to be optimal if it costs at most mismatch_threshold. Otherwise, each
+    sample's current hmm_match bounds the cost, and the match is optimal.
+    """
     num_alleles = 4 if deletions_as_missing else 5
     mu, rho = solve_num_mismatches(num_mismatches, num_alleles)
 
     # Detach any future (negative-time) nodes so that samples can't copy from
     # them. Node IDs are preserved, so the returned match paths stay valid.
     ts = tree_ops.detach_future_nodes(ts)
-    tsb, coord_map = make_tsb(ts, num_alleles, mirror_coordinates)
+    hmm_ts = make_hmm_tree_sequence(ts, mirror_coordinates)
+
+    # tsls divides the recombination probability between the nodes, and
+    # sc2ts's rho is the odds of switching to a given node.
+    recombination = float(tsls.model.recombination_probability(rho, ts.num_nodes))
+    # With deletions as missing data we match with 4 alleles, but deletions
+    # are still in the tree sequence, so we give the mismatch probability
+    # with the same odds for the HMM's 5 alleles.
+    odds = tsls.model.mismatch_odds(mu, num_alleles)
+    mismatch = float(tsls.model.mismatch_probability(odds, len(HMM_ALLELES)))
 
     work = []
     for sample in samples:
@@ -1854,12 +1903,13 @@ def match_tsinfer(
         if deletions_as_missing:
             h[h == DELETION] = MISSING
         if mismatch_threshold is not None:
-            # Likelihood threshold is slightly less than k mutations
-            likelihood_threshold = mu**mismatch_threshold * 0.99
+            max_cost = mismatch_threshold
         else:
             assert sample.hmm_match is not None
-            likelihood_threshold = sample.hmm_match.likelihood
-
+            max_cost = sample.hmm_match.cost
+        prune_threshold = cost_threshold(
+            max_cost, num_mismatches, mismatch, recombination, ts.num_nodes
+        )
         work.append(
             MatchWork(
                 strain=sample.strain,
@@ -1867,19 +1917,21 @@ def match_tsinfer(
                 num_mismatches=num_mismatches,
                 mu=mu,
                 rho=rho,
-                likelihood_threshold=likelihood_threshold,
+                recombination=recombination,
+                mismatch=mismatch,
+                prune_threshold=prune_threshold,
             )
         )
 
     bar = get_progress(work, progress_title, progress_phase, show_progress)
-    manager = MatchingManager(tsb, work, num_threads, bar, memory_limit)
+    manager = MatchingManager(hmm_ts, work, num_threads, bar, memory_limit)
     manager.run()
     results = {work.strain: hmm_match for work, hmm_match in manager.results}
 
     for sample in samples:
         raw_hmm_match = results[sample.strain]
         sample.hmm_match = raw_hmm_match.translate_coordinates(
-            coord_map, mirror_coordinates, ts.sites_position
+            mirror_coordinates, ts.sites_position, ts.sequence_length
         )
         logger.debug(
             f"HMM@T={mismatch_threshold}: {sample.strain} {sample.pango} "
@@ -1977,36 +2029,34 @@ class HmmMatch:
     def mutation_summary(self):
         return "[" + ", ".join(str(mutation) for mutation in self.mutations) + "]"
 
-    def translate_coordinates(self, coord_map, mirror_coordinates, sites_position):
+    def translate_coordinates(self, mirror_coordinates, sites_position, L):
         """
-        Return a copy of this HmmMatch with coordinates translated from raw site-based
-        values to their final positions.
+        Return a copy of this HmmMatch, with the path and mutations as tsls
+        returns them for the tree sequence with the specified site positions
+        and sequence length L (mirrored if mirror_coordinates is True), in
+        the coordinates of the tree sequence and in left-to-right order.
         """
-        L = coord_map[-1]
-        first_pos = coord_map[0]
-        # Set first pos to 0 while we're translating edge coords
-        coord_map[0] = 0
         path = []
         for seg in self.path:
             if mirror_coordinates:
-                left_pos = int(mirror(coord_map[seg.right], L))
-                right_pos = int(mirror(coord_map[seg.left], L))
+                left_pos = int(mirror(seg.right, L))
+                right_pos = int(mirror(seg.left, L))
             else:
-                left_pos = int(coord_map[seg.left])
-                right_pos = int(coord_map[seg.right])
+                left_pos = int(seg.left)
+                right_pos = int(seg.right)
             path.append(PathSegment(left_pos, right_pos, int(seg.parent)))
 
         if not mirror_coordinates:
-            # tsinfer returns the path right-to-left, which we reverse
+            # tsls returns the path right-to-left, which we reverse
             # if matching forwards
             path = path[::-1]
 
-        coord_map[0] = first_pos
+        num_sites = len(sites_position)
         mutations = []
         for mut in self.mutations:
             site_id = mut.site_id
             if mirror_coordinates:
-                site_id = mirror(mut.site_id, len(coord_map) - 2)
+                site_id = mirror(mut.site_id, num_sites - 1)
             mutations.append(
                 MatchMutation(
                     site_id=int(site_id),
@@ -2146,10 +2196,21 @@ def characterise_recombinants(ts, samples):
         for j in range(len(parents) - 1):
             parents_differ = np.where(H[j] != H[j + 1])[0]
             pos = ts.sites_position[parents_differ].astype(int)
-            right = s.hmm_match.path[j].right
-            right_index = np.searchsorted(pos, right)
-            assert pos[right_index] == right
-            left = pos[right_index - 1] + 1
+            # The breakpoint can be anywhere between the sites at which the
+            # parents differ on either side of it with the same likelihood,
+            # and the HMM doesn't specify which of these it returns. If the
+            # parents don't differ on one side, the interval extends to the
+            # end of the parent's segment.
+            breakpoint = s.hmm_match.path[j].right
+            right_index = np.searchsorted(pos, breakpoint)
+            if right_index > 0:
+                left = pos[right_index - 1] + 1
+            else:
+                left = s.hmm_match.path[j].left
+            if right_index < len(pos):
+                right = pos[right_index]
+            else:
+                right = s.hmm_match.path[j + 1].right
             breakpoint_intervals.append((int(left), int(right)))
         s.breakpoint_intervals = breakpoint_intervals
 
@@ -2356,7 +2417,7 @@ def run_hmm(
         progress_title=progress_title,
         keep_sites=ts.sites_position.astype(int),
     )
-    match_tsinfer(
+    match_tsls(
         samples=samples,
         ts=ts,
         num_mismatches=num_mismatches,
@@ -2532,7 +2593,7 @@ def rematch_recombinant(base_ts, recomb_ts, node_id, num_mismatches):
     original_cost = original_match.cost
 
     # Run the match with forced no-recombination path.
-    match_tsinfer(
+    match_tsls(
         samples=[sample],
         ts=base_ts,
         num_mismatches=NO_RECOMBINATION_NUM_MISMATCHES,
@@ -2568,7 +2629,7 @@ def rematch_recombinant_lbs(ts, node_id, num_mismatches):
 
     # Run the original match again because sometimes we find non-recombinant
     # matches just on the nodes that were subsequently created by parsimony ops.
-    match_tsinfer(
+    match_tsls(
         samples=[sample],
         ts=base_ts,
         num_mismatches=num_mismatches,
@@ -2633,7 +2694,7 @@ def rematch_recombinant_lbs(ts, node_id, num_mismatches):
     assert new_ts.num_nodes == base_ts.num_nodes + 1
     assert new_ts.num_mutations == base_ts.num_mutations
 
-    match_tsinfer(
+    match_tsls(
         samples=[sample],
         ts=new_ts,
         num_mismatches=num_mismatches,

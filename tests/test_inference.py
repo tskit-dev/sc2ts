@@ -273,9 +273,9 @@ class TestTinyGenomeInference:
             assert v == reference_node.id
 
 
-class TestMatchTsinfer:
-    def match_tsinfer(self, samples, ts, mirror_coordinates=False, **kwargs):
-        si.match_tsinfer(
+class TestMatchTsls:
+    def match_tsls(self, samples, ts, mirror_coordinates=False, **kwargs):
+        si.match_tsls(
             samples=samples,
             ts=ts,
             num_mismatches=3,
@@ -296,7 +296,7 @@ class TestMatchTsinfer:
         a = jit.encode_alleles(alignment)
         h = a[ts.sites_position.astype(int)]
         samples = [si.Sample("test", "2020-01-01", haplotype=h)]
-        matches = self.match_tsinfer(samples, ts, mirror_coordinates=mirror)
+        matches = self.match_tsls(samples, ts, mirror_coordinates=mirror)
         assert matches[0].breakpoints == [0, ts.sequence_length]
         assert matches[0].parents == [ts.num_nodes - 1]
         assert len(matches[0].mutations) == 0
@@ -315,7 +315,7 @@ class TestMatchTsinfer:
         samples = [si.Sample("test", "2020-01-01", haplotype=h)]
         # Mutate to gap
         h[site_id] = sc2ts.IUPAC_ALLELES.index("-")
-        matches = self.match_tsinfer(samples, ts, mirror_coordinates=mirror)
+        matches = self.match_tsls(samples, ts, mirror_coordinates=mirror)
         assert matches[0].breakpoints == [0, ts.sequence_length]
         assert matches[0].parents == [ts.num_nodes - 1]
         assert len(matches[0].mutations) == 1
@@ -340,7 +340,7 @@ class TestMatchTsinfer:
         ref = a[ts.sites_position.astype(int)]
         h = np.zeros_like(ref) + allele
         samples = [si.Sample("test", "2020-01-01", haplotype=h)]
-        matches = self.match_tsinfer(samples, ts, mirror_coordinates=mirror)
+        matches = self.match_tsls(samples, ts, mirror_coordinates=mirror)
         assert matches[0].breakpoints == [0, ts.sequence_length]
         assert matches[0].parents == [ts.num_nodes - 1]
         muts = matches[0].mutations
@@ -385,7 +385,7 @@ class TestMatchTsinfer:
         # Sanity check: an ordinary (non-future) node that is an exact match IS
         # copied from. This is the behaviour we suppress for future nodes.
         ts, u, sample, site_id = self._extra_node_setup(node_time=0.5)
-        matches = self.match_tsinfer([sample], ts)
+        matches = self.match_tsls([sample], ts)
         assert matches[0].parents == [u]
         assert len(matches[0].mutations) == 0
 
@@ -394,7 +394,7 @@ class TestMatchTsinfer:
         # exactly time zero is still a valid copying target. This is what lets
         # a sample added on one day be copied from on the next.
         ts, u, sample, site_id = self._extra_node_setup(node_time=0)
-        matches = self.match_tsinfer([sample], ts)
+        matches = self.match_tsls([sample], ts)
         assert matches[0].parents == [u]
         assert len(matches[0].mutations) == 0
 
@@ -403,7 +403,7 @@ class TestMatchTsinfer:
         # copied from; the sample falls back to the reference and carries the
         # differing site as a mutation.
         ts, u, sample, site_id = self._extra_node_setup(node_time=-5)
-        matches = self.match_tsinfer([sample], ts)
+        matches = self.match_tsls([sample], ts)
         assert u not in matches[0].parents
         assert matches[0].parents == [1]
         assert len(matches[0].mutations) == 1
@@ -2846,7 +2846,7 @@ class TestMatchingDetails:
 
     def test_match_recombinant(self, fx_ts_map):
         ts, s = recombinant_example_1(fx_ts_map)
-        si.match_tsinfer(
+        si.match_tsls(
             samples=[s],
             ts=ts,
             num_mismatches=2,
@@ -2895,7 +2895,7 @@ class TestCharacteriseRecombinants:
         left_parent = 31
         right_parent = 46
 
-        si.match_tsinfer(
+        si.match_tsls(
             samples=[s],
             ts=ts,
             num_mismatches=2,
@@ -2914,7 +2914,7 @@ class TestCharacteriseRecombinants:
         si.characterise_recombinants(ts, [s])
         assert s.breakpoint_intervals == [(interval_left, interval_right)]
 
-        si.match_tsinfer(
+        si.match_tsls(
             samples=[s],
             ts=ts,
             num_mismatches=2,
@@ -2946,7 +2946,7 @@ class TestCharacteriseRecombinants:
         base_ts = tables.tree_sequence()
 
         s = si.Sample("3way", "2020-02-14", haplotype=h.astype(np.int8))
-        si.match_tsinfer(
+        si.match_tsls(
             samples=[s],
             ts=base_ts,
             num_mismatches=2,
@@ -2959,7 +2959,7 @@ class TestCharacteriseRecombinants:
         assert m.breakpoints == [0, 15001, 29825, 29904]
         assert s.breakpoint_intervals == [(114, 15001), (15010, 29825)]
         # Verify that these breakpoints correspond to the reverse-direction HMM
-        si.match_tsinfer(
+        si.match_tsls(
             samples=[s],
             ts=base_ts,
             num_mismatches=2,
@@ -2985,7 +2985,7 @@ class TestCharacteriseRecombinants:
         base_ts = tables.tree_sequence()
 
         s = si.Sample("3way", "2020-02-14", haplotype=h.astype(np.int8))
-        si.match_tsinfer(
+        si.match_tsls(
             samples=[s],
             ts=base_ts,
             num_mismatches=2,
